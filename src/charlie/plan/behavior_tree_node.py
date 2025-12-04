@@ -4,7 +4,6 @@ from py_trees.common import Status
 from py_trees.composites import Sequence, Selector, Parallel
 from py_trees.common import ParallelPolicy
 
-
 class BatteryRequired(py_trees.behaviour.Behaviour):
     def __init__(self, name="BatteryRequired", threshold=15.0):
         super(BatteryRequired, self).__init__(name)
@@ -84,15 +83,14 @@ class GoCharge(py_trees.behaviour.Behaviour):
         # Battery OK, no need to charge (silent FAILURE)
         return Status.FAILURE
 
-
 class SignalFire(py_trees.behaviour.Behaviour):
     def update(self):
         self.logger.info("ACTION -> SignalFire (Emergency)")
         return Status.SUCCESS
 
-class Exit(py_trees.behaviour.Behaviour):
-    def __init__(self, name="Exit"):
-        super(Exit, self).__init__(name)
+class ChangeDirection(py_trees.behaviour.Behaviour):
+    def __init__(self, name="ChangeDirection"):
+        super(ChangeDirection, self).__init__(name)
     def update(self):
         self.logger.info(f"ACTION -> {self.name} (Stopping Robot)")
         return Status.SUCCESS
@@ -135,7 +133,7 @@ class CalculateExploring(py_trees.behaviour.Behaviour):
 
 class Idle(py_trees.behaviour.Behaviour):
     def update(self):
-        self.logger.info("INFO -> Check")
+        self.logger.info("INFO -> ResultCheckNegative")
         return Status.SUCCESS
 
 class ExploreStep(py_trees.behaviour.Behaviour):
@@ -155,7 +153,7 @@ def create_rescue_tree():
     fire_handler.add_children([
         FireDetected(name="FireDetected"),
         SignalFire(name="SignalFire"),
-        Exit(name="ChangeDirection")
+        ChangeDirection(name="ChangeDirection")
     ])
     
     fire_inverter = py_trees.decorators.Inverter(name="InverterFireHandler", child=fire_handler)
@@ -195,12 +193,12 @@ def create_rescue_tree():
     # 1.3 Exploration
     explore_seq = Sequence("Exploration", memory=False)
     
-    smart_move = Parallel("SmartMove", policy=py_trees.common.ParallelPolicy.SuccessOnAll(synchronise=False))
-    smart_move.add_children([
+    move_decision = Parallel("MoveDecisionParallel", policy=py_trees.common.ParallelPolicy.SuccessOnAll(synchronise=False))
+    move_decision.add_children([
         PerceptionCamera(name="PerceptionCamera"),
         CalculateExploring(name="CalculateExploring")
     ])
-    explore_seq.add_child(smart_move)
+    explore_seq.add_child(move_decision)
     explore_seq.add_child(ExploreStep(name="ExploreRoom"))
 
     # Assemble Main Sequence
@@ -210,7 +208,7 @@ def create_rescue_tree():
     # MissionTree = Battery Check + GoCharge Guard + Mission + GoHome
     
     # Mission (Battery Check + Main Sequence + GoHome)
-    mission_branch = Sequence("MissionTree", memory=False)
+    mission_branch = Sequence("MissionTreeSequence", memory=False)
     charge_inverter = py_trees.decorators.Inverter(name="ChargeInverter", child=GoCharge(name="GoCharge"))
 
     mission_branch.add_children([

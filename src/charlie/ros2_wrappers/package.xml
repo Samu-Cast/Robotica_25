@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>charlie</name>
+  <version>0.1.0</version>
+  <description>Charlie - Emergency Rescue Robot</description>
+  <maintainer email="castellani.samuele04@gmail.com">Charlie Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <!-- Core -->
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  
+  <!-- Vision -->
+  <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
+  
+  <!-- Navigation -->
+  <depend>nav2_msgs</depend>
+  <depend>tf2_ros</depend>
+  
+  <!-- Gazebo -->
+  <depend>gazebo_ros</depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
