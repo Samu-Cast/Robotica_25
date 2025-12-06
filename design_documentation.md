@@ -14,15 +14,11 @@ Charlie is based on a four-wheeled mobile rover platform equipped with a low-pro
 
 Charlie integrates a multimodal sensing suite designed for emergency environment perception:
 
-RGB Camera – captures visual information for obstacle and fire detection.
-
-Depth Sensor / RGB-D Camera – provides 3D structure of the environment for mapping and navigation.
+RGB Camera – captures visual information for objects recognition.
 
 Thermal Sensor – detects hotspots and active fire sources.
 
 Proximity / Lidar Sensor – assists with obstacle avoidance and safe path planning.
-
-Environmental Temperature Sensor – monitors ambient heat to assess dangerous areas.
 
 These sensors enable robust perception even under low visibility due to smoke or structural damage.
 
