@@ -10,7 +10,8 @@ services:
       - VNC_PASSWORD=password
       - QT_X11_NO_MITSHM=1
     volumes:
-      - ./src:/home/ubuntu/ros2_ws/src
+      - ../src/charlie_robot:/home/ubuntu/ros2_ws/src/charlie_robot
+      - ../models:/home/ubuntu/ros2_ws/models
     security_opt:
       - seccomp=unconfined
     stdin_open: true

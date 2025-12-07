@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  controller:
+    build: ./controller
+    container_name: charlie_controller
+    networks:
+      - charlie_network
+    restart: unless-stopped
+
+  perception:
+    build: ./perception
+    container_name: charlie_perception
+    networks:
+      - charlie_network
+    restart: unless-stopped
+
+  sense:
+    build: ./sense
+    container_name: charlie_sense
+    networks:
+      - charlie_network
+    restart: unless-stopped
+
+  action:
+    build: ./action
+    container_name: charlie_action
+    networks:
+      - charlie_network
+    restart: unless-stopped
+
+networks:
+  charlie_network:
+    driver: bridge
