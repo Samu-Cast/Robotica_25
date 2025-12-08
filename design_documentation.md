@@ -2,39 +2,36 @@ Design Document – ISRLAB Virtual Robotics Project
 
 1. General Project Description (Abstract)
 
-This project introduces Charlie, an autonomous mobile robot designed to operate in hazardous indoor environments during emergency situations such as building fires. Charlie's primary mission is to autonomously explore the environment, locate the fire‑suppression activation point (lever or button), and enable the building’s safety system. During its exploration, Charlie detects and reports critical hazards such as fire sources and potential victims using its onboard perception system. The robot communicates these findings to rescuers to support safe and efficient intervention. Its operation focuses on navigating confined and smoke‑filled spaces, avoiding obstacles, identifying dangers, and reaching the activation area without requiring human presence in unsafe zones.
+This project introduces Charlie, an autonomous mobile robot designed to operate inside hazardous indoor environments affected by accidental toxic substance release. The scenario simulates a chemical laboratory where a contaminant leak has compromised air quality and visibility, making human intervention dangerous.
+Charlie’s primary mission is to reach and activate the emergency ventilation system, located in one of several possible locations inside the building. To accomplish this, the robot autonomously explores the environment, navigates toward predefined candidate points, and reacts to unexpected obstacles along the way.
+During its mission, Charlie identifies chemical debris, laboratory containers, and potential victims, using onboard perception based on object detection. The robot reports detected victims to rescue teams and ignores or bypasses non-hazardous obstacles. Its operation enhances safety by avoiding the need for personnel to enter contaminated zones.
 
 2. Robot Model Description
 
 2.1 Robot Model
 
-Charlie is based on a four-wheeled mobile rover platform equipped with a low-profile chassis suitable for navigating narrow corridors and cluttered indoor environments. The model is selected from the simulator’s standard robot library to ensure compatibility with built‑in sensors and actuators.
+Charlie is based on a compact mobile rover platform selected from the Gazebo Harmonic standard model library. The chosen platform ensures compatibility with default sensors, differential-drive control, and ROS 2 navigation. Its chassis is optimized for indoor exploration and cluttered laboratory layouts.
 
 2.2 Sensors Set
 
-Charlie integrates a multimodal sensing suite designed for emergency environment perception:
+Charlie integrates a multimodal perception suite suited for chemical emergency scenarios:
 
-RGB Camera – captures visual information for objects recognition.
+RGB Camera – used for real-time object detection via YOLO (victims, buttons).
 
-Thermal Sensor – detects hotspots and active fire sources.
-
-Proximity / Lidar Sensor – assists with obstacle avoidance and safe path planning.
-
-These sensors enable robust perception even under low visibility due to smoke or structural damage.
+Ultrasonic Sensors – assist in mapping, localization, and obstacle avoidance.
 
 2.3 Actuators Set
 
-Charlie uses the following actuators:
+Charlie is equipped with:
 
-Differential drive motors for movement and steering.
+Differential drive motors, enabling precise motion in tight interior spaces.
 
-Optional micro‑arm actuator if physical interaction with the fire‑suppression lever is required.
-
-Depending on the simulation setup, activation of the fire‑suppression system may be achieved either through physical interaction or by reaching a designated activation zone.
+Optional micro-arm or virtual activation module, used only if physical interaction with the ventilation switch is required.
+In simulations where physical contact is unnecessary, reaching a designated activation zone is sufficient to trigger the system.
 
 2.4 Body Shape
 
-Charlie is designed as a compact, lightweight rover with a rectangular base and four wheels. Its low-height frame allows movement under partially collapsed structures, while its slim profile ensures maneuverability in tight indoor passageways. The robot's shape is optimized for stability, mobility, and safe operation in hazardous environments.
+Charlie is designed as a compact, lightweight rover with a circular base. Its low-height frame allows movement under partially collapsed structures, while its slim profile ensures maneuverability in tight indoor passageways. The robot's shape is optimized for stability, mobility, and safe operation in hazardous environments.
 
 2.5 Capabilities & Degrees of Freedom
 
@@ -42,49 +39,46 @@ Charlie features the following capabilities:
 
 Autonomous navigation in cluttered indoor environments.
 
-Real‑time mapping and obstacle avoidance.
+Real‑time obstacle avoidance.
 
-Fire and victim detection through multimodal sensing.
+Victim detection through visual sensing.
 
-Communication of detected hazards to rescuers.
+Communication of detected victims to rescuers.
 
 Optional physical actuation if equipped with a micro‑arm.
 
 Degrees of Freedom (DOF):
 
-2 DOF for differential drive (left/right wheels).
+2 DOF for differential drive (forward/backward and rotation).
 
 +1 DOF if an optional activation arm is installed.
 
 3. Simulator Environment Choice
 
-The simulation takes place in a virtual indoor emergency scenario, modeled as a building affected by a localized or widespread fire. The environment includes:
+The simulation is performed inside a virtual chemical laboratory affected by a toxic leak, modeled in Gazebo Harmonic. The environment includes:
 
-Corridors, rooms, and obstacles.
+- Interconnected corridors and rooms
+- Broken chemical vials, containers, and scattered debris placed as navigation obstacles.
+- Potential human-like targets to simulate victims.
+- Dedicated activation zones where the emergency ventilation system may be located.
 
-Fire hotspots of varying intensity.
-
-Areas with reduced visibility.
-
-Potential human-like targets to simulate victims.
-
-The chosen environment supports realistic sensing, navigation, and hazard detection tasks.
+Gazebo Harmonic is paired with ROS 2 (Jazzy) to control the robot, manage sensor data, handle navigation (Nav2), and run the perception stack (YOLO).
 
 4. Robot Goal Definition
 
 4.1 Main Goal
 
-Charlie’s primary objective is to reach and activate the building’s fire‑suppression system by navigating autonomously through hazardous indoor environments.
+Charlie’s primary objective is to navigate autonomously through the contaminated laboratory and reach the emergency ventilation control to activate the extraction system.
 
 4.2 Sub-goals
 
-Detect and report fire hotspots.
+- Detect and avoid chemical debris (broken vials, containers, equipment).
 
-Detect and report human presence.
+- Detect and report human presence, forwarding victim information to rescuers.
 
-Avoid obstacles, debris, and dangerous heat zones.
+- Safely explore the environment, moving through predefined candidate locations until the correct activation point is found.
 
-Explore the environment efficiently and safely.
+- Maintain safe operation in a hazardous environment without human assistance.
 
 5. Design Methodology
 
