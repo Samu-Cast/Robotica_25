@@ -86,6 +86,8 @@ Charlie’s primary objective is to navigate autonomously through the contaminat
 
 Charlie’s control system is structured according to the Hierarchical Architecture described in Chapter 2 of the AI-FCA textbook. The agent is organized into three coordinated layers, each responsible for a different level of abstraction in perception, decision-making, and action execution.
 
+![alt text](<architecture/overral architecture.drawio.png>)
+
 Reactive Layer (Low Level)
 
 Manages real‑time, safety‑critical behaviors:
