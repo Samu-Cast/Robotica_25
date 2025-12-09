@@ -16,8 +16,8 @@ flowchart TD
     FallBack1 ==> Parallel0[Parallel / --> -->]
     Parallel0 --> RaggiungiTarget[MoveToTarget]
     RaggiungiTarget -.read.-> BlackBoard
-    Parallel0 ==Loop==> Decorator1{σ}
-    Decorator1 ===> Sequence1[Sequence / -->]
+    Parallel0 ===> Decorator1{σ}
+    Decorator1 ==Loop==> Sequence1[Sequence / -->]
     Sequence1 --> SearchObj[SearchObj]
     Sequence1 ===> FallBack2[FallBack / ?]
     FallBack2 ==>Sequence2[Sequence / -->]
