@@ -5,18 +5,18 @@ flowchart TD
     Root[Root]==>Decorator0[Decorator]
     Decorator0 ==LoopUntilSuccess==> Sequence0
     Sequence0[Sequence/-->] ====> FallBack0[FallBack/?]
-    FallBack0 --> ConditionBatt([BatteryRequired?])
+    FallBack0 --> ConditionBatt([BatteryOk?])
     FallBack0 --> ActionBatt[GoCharge]
-    Sequence0 --> CalcolaTarget[CalcolaTarget]
-    CalcolaTarget -.write.-> BlackBoard[(BlackBoard)]
+    Sequence0 --> ComputeTarget[ComputeTarget]
+    ComputeTarget -.write.-> BlackBoard[(BlackBoard)]
     Sequence0 ==> FallBack1[FallBack/?]
-    FallBack1 --> InPosizione([InPosizione?])
-    InPosizione -.read.-> BlackBoard
+    FallBack1 --> InPosition([InPosition?])
+    InPosition -.read.-> BlackBoard
     FallBack1 ==> Parallel0[Parallel/-->-->]
-    Parallel0 --> RaggiungiTarget[RaggiungiTarget]
-    RaggiungiTarget -.read.-> BlackBoard
-    Parallel0 ==Loop==> Decorator1[{Decorator}]
-    Decorator1 ===> Sequence1[Sequence/-->]
+    Parallel0 --> ReachTarget[ReachTarget]
+    ReachTarget -.read.-> BlackBoard
+    Parallel0 ===> Decorator1[Decorator]
+    Decorator1 ==Loop==> Sequence1[Sequence/-->]
     Sequence1 --> SearchObj[SearchObj]
     Sequence1 ===> FallBack2[FallBack/?]
     FallBack2 ==>Sequence2[Sequence/-->]

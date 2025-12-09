@@ -1,3 +1,4 @@
+```mermaid
 graph TD
     %% High Level Layer
     subgraph HIGH_LEVEL["HIGH LEVEL: DECISION (Main CPU)"]
@@ -57,3 +58,4 @@ graph TD
     class BT,BB,TM high;
     class GP,LP,CM,VIS mid;
     class MC,ODOM,DRV low;
+    ```
