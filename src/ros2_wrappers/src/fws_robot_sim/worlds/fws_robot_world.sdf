@@ -66,101 +66,43 @@
       <pose>0 0 0 0 0 0</pose>
       <self_collide>false</self_collide>
     </model>
-    <model name='cylinder'>
-      <pose>1.0 -0.8 0.15 0 0 0</pose>
-      <link name='cylinder_link'>
-        <inertial>
-          <inertia>
-            <ixx>0.145</ixx>
-            <ixy>0</ixy>
-            <ixz>0</ixz>
-            <iyy>0.145</iyy>
-            <iyz>0</iyz>
-            <izz>0.125</izz>
-          </inertia>
-          <mass>1</mass>
-          <pose>0 0 0 0 0 0</pose>
-        </inertial>
-        <collision name='cylinder_collision'>
-          <geometry>
-            <cylinder>
-              <radius>0.2</radius>
-              <length>0.3</length>
-            </cylinder>
-          </geometry>
-          <surface>
-            <friction>
-              <ode/>
-            </friction>
-            <bounce/>
-            <contact/>
-          </surface>
-        </collision>
-        <visual name='cylinder_visual'>
-          <geometry>
-            <cylinder>
-              <radius>0.2</radius>
-              <length>0.3</length>
-            </cylinder>
-          </geometry>
-          <material>
-            <ambient>0.300000012 0.300000012 0.300000012 1</ambient>
-            <diffuse>0.699999988 0.699999988 0.699999988 1</diffuse>
-            <specular>1 1 1 1</specular>
-          </material>
-        </visual>
-        <pose>0 0 0 0 0 0</pose>
-        <enable_wind>false</enable_wind>
-      </link>
-      <static>false</static>
-      <self_collide>false</self_collide>
-    </model>
-    <model name='box'>
-      <pose>-0.7 0.5 0.15 0 0 0</pose>
-      <link name='box_link'>
-        <inertial>
-          <inertia>
-            <ixx>0.16666</ixx>
-            <ixy>0</ixy>
-            <ixz>0</ixz>
-            <iyy>0.16666</iyy>
-            <iyz>0</iyz>
-            <izz>0.16666</izz>
-          </inertia>
-          <mass>1</mass>
-          <pose>0 0 0 0 0 0</pose>
-        </inertial>
-        <collision name='box_collision'>
+    <model name="front_wall">
+      <static>true</static>
+      <pose>1.0 0 0 0 0 1.5708</pose>  <!-- davanti all'origine -->
+
+      <link name="wall_link">
+        <collision name="wall_collision">
           <geometry>
             <box>
-              <size>0.3 0.3 0.3</size>
+              <size>2.0 0.1 1.0</size> <!-- larghezza, spessore, altezza -->
             </box>
           </geometry>
-          <surface>
-            <friction>
-              <ode/>
-            </friction>
-            <bounce/>
-            <contact/>
-          </surface>
         </collision>
-        <visual name='box_visual'>
+
+        <visual name="wall_visual">
           <geometry>
             <box>
-              <size>0.3 0.3 0.3</size>
+              <size>2.0 0.1 1.0</size>
             </box>
           </geometry>
           <material>
-            <ambient>0.300000012 0.300000012 0.300000012 1</ambient>
-            <diffuse>0.699999988 0.699999988 0.699999988 1</diffuse>
-            <specular>1 1 1 1</specular>
+            <script>
+              <uri>file://textures/</uri>
+              <name>brick</name>
+            </script>
+            <diffuse>1 1 1 1</diffuse>
           </material>
         </visual>
-        <pose>0 0 0 0 0 0</pose>
-        <enable_wind>false</enable_wind>
+
+        <inertial>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx>
+            <iyy>1</iyy>
+            <izz>1</izz>
+          </inertia>
+        </inertial>
       </link>
-      <static>false</static>
-      <self_collide>false</self_collide>
     </model>
     <light name='sun' type='directional'>
       <pose>0 0 10 0 0 0</pose>
