@@ -2,7 +2,7 @@ services:
   ros2-sim:
     platform: linux/amd64
     build: .
-    container_name: ros2_jazzy_sim
+    container_name: ros2_jazzy_sim_git
     ports:
       - "8080:80"
     shm_size: '2gb'
@@ -10,7 +10,7 @@ services:
       - VNC_PASSWORD=password
       - QT_X11_NO_MITSHM=1
     volumes:
-      - ../src/charlie_robot:/home/ubuntu/ros2_ws/src/charlie_robot
+      - ../src/:/home/ubuntu/ros2_ws/src/
       - ../models:/home/ubuntu/ros2_ws/models
     security_opt:
       - seccomp=unconfined
