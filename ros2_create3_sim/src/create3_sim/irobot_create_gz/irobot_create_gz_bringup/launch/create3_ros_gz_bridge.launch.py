@@ -190,6 +190,20 @@ def generate_launch_description():
         ]
     )
 
+    camera_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='camera_bridge',
+        parameters=[{
+            'use_sim_time': use_sim_time
+        }],
+        output='screen',
+        arguments=[
+            '/camera_front/image@sensor_msgs/msg/Image@gz.msgs.Image',
+            '/camera_front/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo'
+        ]
+    )
+
     # Create launch description and add actions
     ld = LaunchDescription(ARGUMENTS)
     ld.add_action(cmd_vel_bridge)
@@ -199,4 +213,5 @@ def generate_launch_description():
     ld.add_action(cliff_bridges)
     ld.add_action(ir_bridges)
     ld.add_action(buttons_msg_bridge)
+    ld.add_action(camera_bridge)
     return ld

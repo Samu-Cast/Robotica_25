@@ -41,7 +41,7 @@ def generate_launch_description():
     ignition = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([ignition_launch]),
         launch_arguments=[
-            ('world', LaunchConfiguration('world'))
+            ('world', LaunchConfiguration('world')),
         ]
     )
 
@@ -58,6 +58,8 @@ def generate_launch_description():
     create3_nodes = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([create3_nodes_launch]),
         launch_arguments=[])
+
+
 
     # Create launch description and add actions
     ld = LaunchDescription(ARGUMENTS)

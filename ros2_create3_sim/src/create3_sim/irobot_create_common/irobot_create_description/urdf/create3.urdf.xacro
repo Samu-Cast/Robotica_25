@@ -7,6 +7,7 @@
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/cliff_sensor.urdf.xacro"/>
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/imu.urdf.xacro" />
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/ir_intensity.urdf.xacro" />
+  <xacro:include filename="$(find irobot_create_description)/urdf/sensors/camera_sensor.urdf.xacro" />  
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/ir_opcode_receivers.urdf.xacro" />
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/optical_mouse.urdf.xacro"/>
   <xacro:include filename="$(find irobot_create_description)/urdf/wheel_with_wheeldrop.urdf.xacro" />
@@ -152,6 +153,12 @@
     <origin xyz="0.1015 0.087 ${-0.055 + base_link_z_offset}" rpy="0 0 ${-pi/4}"/>
   </xacro:optical_mouse>
 
+  <!--Camera sensor -->
+  <xacro:camera_sensor name="front" gazebo="$(arg gazebo)" namespace="$(arg namespace)">
+    <origin xyz="0.12 0 ${0.18 + base_link_z_offset}" rpy="0 0 0"/>
+  </xacro:camera_sensor>
+
+
   <!-- Cliffs sensors -->
   <xacro:property name="cliff_z"  value="${-4.5*cm2m}" />
 
@@ -294,12 +301,11 @@
     
     <gazebo>
       <plugin filename="libgz-sim-contact-system.so" name="gz::sim::systems::Contact"></plugin>
-    </gazebo>
-
-    <gazebo>
       <plugin filename="libgz-sim-sensors-system.so" name="gz::sim::systems::Sensors">
-        <render_engine>ogre</render_engine>
+        <render_engine>ogre2</render_engine>
       </plugin>
     </gazebo>
+
+
   </xacro:if>
 </robot>
