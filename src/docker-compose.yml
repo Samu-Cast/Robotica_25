@@ -22,9 +22,20 @@ services:
       - charlie_network
     restart: unless-stopped
 
+  plan:
+    build: ./plan
+    container_name: charlie_plan
+    depends_on:
+      - sense
+    networks:
+      - charlie_network
+    restart: unless-stopped
+
   action:
-    build: ./action
+    build: ./act
     container_name: charlie_action
+    depends_on:
+      - plan
     networks:
       - charlie_network
     restart: unless-stopped

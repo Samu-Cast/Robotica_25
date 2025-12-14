@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """
-Charlie Robot Behavior Tree 
-Robot searches in 3 targets, finds and activates valve, returns home.
+    Charlie Robot Behavior Tree 
+    Robot searches in 3 targets, finds and activates valve, returns home.
 """
 
 import py_trees
@@ -89,7 +88,8 @@ class AtTarget(py_trees.behaviour.Behaviour):
             return Status.SUCCESS
         return Status.FAILURE
 
-#ACTION: move a step tothe target with lose of battery
+#ACTION: move a step to the target with loss of battery
+#Returns RUNNING while moving, SUCCESS when at target
 class MoveToTarget(py_trees.behaviour.Behaviour):
 
     def __init__(self):
@@ -104,9 +104,16 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         target = self.robot.get("target")
         batt = self.robot.get("battery")
         
+        # Già al target? → SUCCESS
+        if pos == target["pos"]:
+            self.logger.info(f"  Arrived at target pos {pos}")
+            self.feedback_message = f"At target {pos}"
+            return Status.SUCCESS
+        
+        # Muovi di un passo verso target
         if pos < target["pos"]:
             pos += 1
-        elif pos > target["pos"]:
+        else:
             pos -= 1
         
         batt = max(0, batt - 1)
@@ -114,7 +121,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         self.robot.set("battery", batt)
         self.logger.info(f"  Moving to pos {pos}")
         self.feedback_message = f"Moving to {pos} (battery {batt:.1f}%)"
-        return Status.SUCCESS
+        return Status.RUNNING  # Continua fino a raggiungere target
 
 #ACTION: search objects during movement
 class SearchObj(py_trees.behaviour.Behaviour):
@@ -155,11 +162,11 @@ class RecognitionPerson(py_trees.behaviour.Behaviour):
     def update(self):
         return Status.SUCCESS if self.robot.get("found") == "person" else Status.FAILURE
 
-#ACTION: robot signal pearson found
+#ACTION: robot signal person found
 class SignalPerson(py_trees.behaviour.Behaviour):
   
     def __init__(self):
-        super().__init__(name="SignalPearson")
+        super().__init__(name="SignalPerson")  # Fixed typo
         self.robot = self.attach_blackboard_client(name=self.name)
         self.robot.register_key("signals", access=py_trees.common.Access.WRITE)
     
@@ -250,7 +257,7 @@ class ActiveValve(py_trees.behaviour.Behaviour):
         self.feedback_message = "Valve activated"
         return Status.SUCCESS
 
-#ACTION: go home, mission complete daje
+#ACTION: go home step by step, mission complete daje
 class GoHome(py_trees.behaviour.Behaviour):
     
     def __init__(self):
@@ -261,45 +268,101 @@ class GoHome(py_trees.behaviour.Behaviour):
     
     def update(self):
         pos = self.robot.get("pos")
-        batt = max(0, self.robot.get("battery") - pos)
-        pos = 0
+        
+        # Arrivato a casa?
+        if pos == 0:
+            self.logger.info(f"  Home reached!")
+            self.feedback_message = "Home reached"
+            return Status.SUCCESS
+        
+        # Muovi di un passo verso home
+        if pos > 0:
+            pos -= 1
+        else:
+            pos += 1
+        
+        batt = max(0, self.robot.get("battery") - 1)
         self.robot.set("pos", pos)
         self.robot.set("battery", batt)
-        self.logger.info(f"  Returning home (pos {pos})")
-        self.feedback_message = f"Returning home (pos {pos})"
-        return Status.SUCCESS
+        self.logger.info(f"  Moving home (pos {pos})")
+        self.feedback_message = f"Moving home (pos {pos})"
+        return Status.RUNNING  # Continua fino a pos=0
         
 
 # Build the behavior tree
 def build_tree():
     
-    selector0 = Selector("Battery", memory=False)
-    selector0.add_children([BatteryRequired(), GoCharge()])
-    sequence1 = Sequence("SearchObj", memory=False)
-    selector2 = Selector("Person/Obstacle", memory=False)
-    sequence2 = Sequence("SeqPerson", memory=False)
-    sequence2.add_children([RecognitionPerson(), SignalPerson(), GoAroundP()])
-    sequence3 = Sequence("SeqObstacle", memory=False)
-    sequence3.add_children([RecognitionObstacle(),GoAroundO()]) ############
-    selector2.add_children([sequence2, sequence3])
-    sequence1.add_children([SearchObj(), selector2])
-    selector1 = Selector("InPosition", memory=False)
-    parallel = Parallel("GoTarget", policy=ParallelPolicy.SuccessOnAll())
-    decorators1 = decorators.FailureIsSuccess(name="decorator" , child=sequence1)
-    selector1.add_children([AtTarget(), parallel])
-    parallel.add_children([MoveToTarget(),decorators1])
-
-    # Main loop
-    main = Sequence("MainLoop", memory=False)
-    main.add_children([
-        selector0,
-        CalculateTarget(),
-        selector1,
-        RecognitionValve(),
-        ActiveValve(),
-        GoHome()
+    # === FallBack0: Battery management ===
+    fallback0 = Selector("FallBack0_Battery", memory=False, children=[
+        BatteryRequired(),
+        GoCharge()
     ])
-    return main
+    
+    # === Sequence2: Handle Person ===
+    sequence2 = Sequence("Sequence2_Person", memory=False, children=[
+        RecognitionPerson(),
+        SignalPerson(),
+        GoAroundP()
+    ])
+    
+    # === Sequence3: Handle Obstacle ===
+    sequence3 = Sequence("Sequence3_Obstacle", memory=False, children=[
+        RecognitionObstacle(),
+        GoAroundO()
+    ])
+    
+    # === FallBack2: Person / Obstacle ===
+    fallback2 = Selector("FallBack2_HandleFound", memory=False, children=[
+        sequence2,
+        sequence3
+    ])
+    
+    # === Sequence1: SearchObj → FallBack2 ===
+    sequence1 = Sequence("Sequence1_Search", memory=False, children=[
+        SearchObj(),
+        fallback2
+    ])
+    
+    # === Decorator1: FailureIsSuccess per non bloccare il Parallel ===
+    decorator1 = decorators.FailureIsSuccess(
+        name="Decorator1_SearchLoop",
+        child=sequence1
+    )
+    
+    # === Parallel0: MoveToTarget + Decorator1 ===
+    # SuccessOnAll: aspetta che MoveToTarget arrivi al target
+    parallel0 = Parallel(
+        "Parallel0_MoveAndSearch",
+        policy=ParallelPolicy.SuccessOnAll(),
+        children=[MoveToTarget(), decorator1]
+    )
+    
+    # === FallBack1: AtTarget? / Parallel0 ===
+    fallback1 = Selector("FallBack1_GoToTarget", memory=False, children=[
+        AtTarget(),
+        parallel0
+    ])
+    
+    # === Sequence0: Main sequence (dentro il loop) ===
+    # memory=True per ricordare il progresso quando un figlio ritorna RUNNING
+    sequence0 = Sequence("Sequence0_Main", memory=True, children=[
+        fallback0,           # Battery check
+        CalculateTarget(),   # Select next target
+        fallback1,           # Go to target (with search)
+        RecognitionValve(),  # Check valve (FAILURE → loop retry)
+        ActiveValve(),       # Activate valve (only if valve found)
+        GoHome()             # Return home (only after valve activated)
+    ])
+    
+    # === Decorator0: LoopUntilSuccess ===
+    # Retry con num_failures=-1 ripete all'infinito finché non c'è SUCCESS
+    decorator0 = decorators.Retry(
+        name="Decorator0_LoopUntilSuccess",
+        child=sequence0,
+        num_failures=-1  # -1 = infinite retries until success
+    )
+    
+    return decorator0
 
 # Simulation function
 def simulate(name, battery, targets):

@@ -1,14 +1,23 @@
-FROM python:3.10-slim
+FROM ros:jazzy-ros-base
 
-WORKDIR /app
+LABEL maintainer="Charlie Team"
+LABEL description="Plan Node - Behavior Tree Decision Making"
 
-# Install dependencies
-RUN pip install --no-cache-dir \
+WORKDIR /ros2_ws
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip3 install --break-system-packages \
     py_trees \
-    opencv-python-headless \
-    numpy \
-    paho-mqtt
+    numpy
 
-COPY . .
+# Copy source code
+COPY plan_node.py /ros2_ws/src/plan/
+COPY behavior_tree.py /ros2_ws/src/plan/
 
-CMD ["python", "controller_node.py"]
+# Entry point
+CMD ["python3", "src/plan/plan_node.py"]

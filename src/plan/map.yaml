@@ -1,0 +1,24 @@
+# Mappa topologica Charlie Robot
+# Stanze identificate da colore dominante
+
+rooms:
+  corridor:
+    color: [128, 128, 128]  # Grigio
+    connects: [room_a, room_b, room_c]
+    
+  room_a:
+    color: [180, 80, 80]    # Rosso
+    connects: [corridor]
+    has: valve
+    
+  room_b:
+    color: [80, 80, 180]    # Blu
+    connects: [corridor]
+    has: button
+    
+  room_c:
+    color: [80, 180, 80]    # Verde
+    connects: [corridor]
+
+mission:
+  goal: valve  # Obiettivo da raggiungere
