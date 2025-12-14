@@ -1,3 +1,0 @@
-[submodule "ros2_create3_sim/src/create3_sim"]
-	path = ros2_create3_sim/src/create3_sim
-	url = https://github.com/iRobotEducation/create3_sim.git
