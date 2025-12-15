@@ -1,13 +1,35 @@
-FROM python:3.10-slim
+# Partiamo dall'immagine ufficiale ROS 2 Jazzy (versione base, no GUI)
+FROM ros:jazzy-ros-base
 
-WORKDIR /app
+# Rimaniamo come root. L'entrypoint dell'immagine base gestirà
+# il passaggio all'utente 'ubuntu' all'avvio del container.
+USER root
 
-# Install camera/sensor dependencies
-RUN pip install --no-cache-dir \
+# Set environment
+ENV ROS_DISTRO=jazzy
+
+# Installiamo dipendenze di sistema 
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    libglib2.0-0 \
+    sudo \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installiamo YOLO e librerie Python necessarie
+# (Ultralytics include già numpy, torch, ecc.)
+RUN pip3 install --break-system-packages \
+    "numpy<2.0" \
     opencv-python-headless \
-    numpy \
-    paho-mqtt
+    ultralytics \
+    roboflow
 
-COPY . .
+WORKDIR /home/ubuntu/sense_ws
 
-CMD ["python", "sense_node.py"]
+# Compiliamo il workspace (per rendere visibili i tuoi nodi custom)
+#RUN . /opt/ros/jazzy/setup.sh && colcon build
+
+# Configurazione ambiente
+#COPY ./entrypoint.sh /
+#ENTRYPOINT ["./entrypoint.sh"]
+
+#CMD ["ros2", "run", "tuo_pacchetto", "yolo_node"]
