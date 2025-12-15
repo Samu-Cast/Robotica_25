@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
 
   action:
-    build: ./action
+    build: ./act
     container_name: charlie_action
     networks:
       - charlie_network
