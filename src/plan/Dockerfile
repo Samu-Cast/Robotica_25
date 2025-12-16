@@ -1,27 +1,14 @@
 FROM ros:jazzy-ros-base
 
-USER root
-
-ENV ROS_DISTRO=jazzy
-
 LABEL maintainer="Charlie Team"
-LABEL description="Plan Node - Behavior Tree Decision Making"
-
-WORKDIR /ros2_ws
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+LABEL description="Plan Module - Minimal BT Decision Making"
 
 # Install Python dependencies
-RUN pip3 install --break-system-packages \
-    py_trees \
-    numpy
+RUN pip3 install --break-system-packages py_trees
 
-# Copy source code
-COPY plan_node.py /ros2_ws/src/plan/
-COPY behavior_tree.py /ros2_ws/src/plan/
+# Copy source
+WORKDIR /ros2_ws
+COPY plan_node.py .
 
-# Entry point
-CMD ["python3", "src/plan/plan_node.py"]
+# Run
+CMD ["python3", "plan_node.py"]
