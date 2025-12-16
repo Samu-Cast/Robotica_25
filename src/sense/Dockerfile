@@ -1,6 +1,9 @@
-FROM python:3.10-slim
+# Partiamo dall'immagine ufficiale ROS 2 Jazzy (versione base, no GUI)
+FROM ros:jazzy-ros-base
 
-WORKDIR /app
+# Rimaniamo come root. L'entrypoint dell'immagine base gestirà
+# il passaggio all'utente 'ubuntu' all'avvio del container.
+USER root
 
 # Set environment
 ENV ROS_DISTRO=jazzy
@@ -23,6 +26,13 @@ WORKDIR /home/ubuntu/sense_ws
 # Compiliamo il workspace (per rendere visibili i tuoi nodi custom)
 #RUN . /opt/ros/jazzy/setup.sh && colcon build
 
-COPY . .
+WORKDIR /home/ubuntu/sense_ws
 
-CMD ["python", "sense_node.py"]
+# Compiliamo il workspace (per rendere visibili i tuoi nodi custom)
+#RUN . /opt/ros/jazzy/setup.sh && colcon build
+
+# Configurazione ambiente
+#COPY ./entrypoint.sh /
+#ENTRYPOINT ["./entrypoint.sh"]
+
+#CMD ["ros2", "run", "tuo_pacchetto", "yolo_node"]

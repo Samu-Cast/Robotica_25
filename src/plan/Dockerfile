@@ -1,10 +1,14 @@
-FROM python:3.10-slim
+FROM ros:jazzy-ros-base
 
-WORKDIR /app
+LABEL maintainer="Charlie Team"
+LABEL description="Plan Module - Minimal BT Decision Making"
 
 # Install Python dependencies
 RUN pip3 install -r ./requirements.txt --break-system-packages
 
-COPY . .
+# Copy source
+WORKDIR /ros2_ws
+COPY plan_node.py .
 
-CMD ["python", "controller_node.py"]
+# Run
+CMD ["python3", "plan_node.py"]
