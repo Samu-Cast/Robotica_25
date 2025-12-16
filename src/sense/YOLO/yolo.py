@@ -3,13 +3,15 @@ from ultralytics import YOLO
 
 # Create an instance of the YOLO model
 # Initialize it with the pre-trained weights file 'best.pt' located at the specified path
-model = YOLO('../../models/YOLO/humanDetection/best.pt')
+human_model = YOLO('../../models/YOLO/humanDetection/best.pt')
+#button_model = YOLO('../../models/YOLO/buttonDetection/best.pt')
+
 
 # Define path to video file
 source = '../../models/YOLO/humanDetection/inputs'
 
 # Run inference on the source
-results = model(source, stream=True)  # generator of Results objects
+results = human_model(source, stream=True)  # generator of Results objects
 
 # Iterate over each 'result' in the 'results' collection
 for result in results:

@@ -1,7 +1,8 @@
 services:
   ros2-sim:
     platform: linux/amd64
-    build: .
+    build: 
+      context: ../ros2_create3_sim
     container_name: ros2_jazzy_sim_git
     ports:
       - "8080:80"

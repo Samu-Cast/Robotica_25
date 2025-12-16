@@ -9,4 +9,14 @@ RUN pip install --no-cache-dir \
 
 COPY . .
 
-CMD ["python", "action_node.py"]
+# Installiamo le dipendenze Python
+RUN pip3 install -r ./requirements.txt --break-system-packages
+
+# Copiamo il tuo codice sorgente dentro il container
+WORKDIR /home/ubuntu/act_ws
+
+#ENTRYPOINT [ "./entrypoint.sh" ]
+
+
+# Avvio del nodo ACT
+#CMD source /opt/ros/jazzy/setup.bash && python3 action_node.py
