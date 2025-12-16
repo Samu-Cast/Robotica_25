@@ -1,18 +1,78 @@
 services:
+
+  # ROS2 Jazzy Simulation Container (container host)
   ros2-sim:
     platform: linux/amd64
     build: .
     container_name: ros2_jazzy_sim_git
+    networks:
+      - ros_net
     ports:
-      - "8080:80"
+      - "8081:80"
     shm_size: '2gb'
     environment:
       - VNC_PASSWORD=password
       - QT_X11_NO_MITSHM=1
+      - ROS_DOMAIN_ID=42
     volumes:
-      - ../src/:/home/ubuntu/ros2_ws/src/
-      - ../models:/home/ubuntu/ros2_ws/models
+      # - ../ros2/src:/home/ubuntu/ros2_ws/src/
+      - ../ros2_create3_sim/:/home/ubuntu/ros2_ws/
     security_opt:
       - seccomp=unconfined
     stdin_open: true
     tty: true
+
+  sense:
+    platform: linux/amd64
+    build: ../src/sense
+    container_name: charlie_sense
+    networks:
+      - ros_net
+    restart: unless-stopped
+    depends_on:
+      - ros2-sim
+    environment:
+      - ROS_DOMAIN_ID=42
+    volumes:
+      - ../src/sense/:/home/ubuntu/sense_ws/
+    stdin_open: true
+    tty: true
+
+  plan:
+    platform: linux/amd64
+    build: 
+      context: ../src/plan
+    container_name: charlie_plan
+    networks:
+      - ros_net
+    restart: unless-stopped
+    depends_on:
+      - ros2-sim
+    environment:
+      - ROS_DOMAIN_ID=42
+    volumes:
+      - ../src/plan/:/home/ubuntu/plan_ws/
+    stdin_open: true
+    tty: true
+    
+  act:
+    platform: linux/amd64
+    build: 
+      context: ../src/act
+    container_name: charlie_act
+    networks:
+      - ros_net
+    restart: unless-stopped
+    depends_on:
+      - ros2-sim
+    environment:
+      - ROS_DOMAIN_ID=42
+    volumes:
+      - ../src/act/:/home/ubuntu/act_ws/
+    stdin_open: true
+    tty: true
+
+networks:
+  ros_net:
+    driver: bridge
+

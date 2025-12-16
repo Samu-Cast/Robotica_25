@@ -1,5 +1,9 @@
 FROM ros:jazzy-ros-base
 
+USER root
+
+ENV ROS_DISTRO=jazzy
+
 LABEL maintainer="Charlie Team"
 LABEL description="Plan Node - Behavior Tree Decision Making"
 

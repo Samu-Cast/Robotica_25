@@ -40,11 +40,14 @@ RUN pip3 install --break-system-packages \
 WORKDIR /home/ubuntu/ros2_ws
 
 # Source ROS2 automaticamente in .bashrc dell'utente ubuntu
-RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/ubuntu/.bashrc && \
-    echo "source /home/ubuntu/ros2_ws/install/setup.bash 2>/dev/null || true" >> /home/ubuntu/.bashrc
+RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/ubuntu/.bashrc
+#    echo "source /home/ubuntu/ros2_ws/install/setup.bash 2>/dev/null || true" >> /home/ubuntu/.bashrc
 
 # Fix ownership (l'entrypoint dell'immagine base se ne occuperà comunque)
 RUN chown -R ubuntu:ubuntu /home/ubuntu
+
+RUN echo "cd ~/ros2_ws && colcon build --symlink-install --executor sequential" 
+RUN echo "source /home/ubuntu/ros2_ws/install/setup.bash" >> /home/ubuntu/.bashrc
 
 # Note: L'immagine tiryoh/ros2-desktop-vnc espone già:
 # - Porta 80 per noVNC

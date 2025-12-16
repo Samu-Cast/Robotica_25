@@ -1,12 +1,19 @@
-FROM python:3.10-slim
+FROM ros:jazzy-ros-base
 
-WORKDIR /app
+USER root
 
-# Install dependencies
-RUN pip install --no-cache-dir \
-    numpy \
-    paho-mqtt
+ENV ROS_DISTRO=jazzy
 
-COPY . .
+# Installiamo dipendenze di sistema 
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
 
-CMD ["python", "action_node.py"]
+# Copiamo il tuo codice sorgente dentro il container
+WORKDIR /home/ubuntu/act_ws
+
+#ENTRYPOINT [ "./entrypoint.sh" ]
+
+
+# Avvio del nodo ACT
+#CMD source /opt/ros/jazzy/setup.bash && python3 action_node.py

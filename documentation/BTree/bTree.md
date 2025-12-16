@@ -5,11 +5,11 @@ flowchart TD
     Root[Root] ==> Decorator0{σ}
     Decorator0 ==LoopUntilSuccess==> Sequence0
     Sequence0[Sequence / -->] ====> FallBack0[FallBack / ?]
-    FallBack0 --> ConditionBatt([BatteryRequired?])
+    FallBack0 --> ConditionBatt([BatteryOk?])
     FallBack0 --> ActionBatt[GoCharge]
 
-    Sequence0 --> CalcolaTarget[CalculateTarget]
-    CalcolaTarget -.write.-> BlackBoard(BlackBoard)
+    Sequence0 --> ComputeTarget[ComputeTarget]
+    ComputeTarget -.write.-> BlackBoard(BlackBoard)
     Sequence0 ==> FallBack1[FallBack / ?]
     FallBack1 --> InPosizione([AtTarget?])
     InPosizione -.read.-> BlackBoard
@@ -26,7 +26,7 @@ flowchart TD
     Sequence2 --> SignalAction[SignalPerson]
     SignalAction -.write.-> BlackBoard
     Sequence2 --> GoAraund[GoAraundP]
-    Sequence3 --> RecognitionAction2[RecognitionObstacol]
+    Sequence3 --> RecognitionAction2[RecognitionObstacle]
     Sequence3 --> GoAraund2[GoAraundO]
 
      
