@@ -1,13 +1,14 @@
-FROM python:3.10-slim
+FROM ros:jazzy-ros-base
+
+SHELL ["/bin/bash", "-c"]
 
 WORKDIR /app
 
-# Install dependencies
-RUN pip install --no-cache-dir \
-    numpy \
-    paho-mqtt
+# Dipendenze Python extra (se servono)
+RUN pip install --no-cache-dir numpy paho-mqtt
 
-COPY . .
+# Copia il nodo ACT
+COPY action_node.py .
 
 # Installiamo le dipendenze Python
 RUN pip3 install -r ./requirements.txt --break-system-packages
