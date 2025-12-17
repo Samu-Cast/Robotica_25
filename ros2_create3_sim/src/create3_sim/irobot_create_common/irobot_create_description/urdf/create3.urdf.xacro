@@ -8,6 +8,7 @@
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/imu.urdf.xacro" />
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/ir_intensity.urdf.xacro" />
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/camera_sensor.urdf.xacro" />  
+  <xacro:include filename="$(find irobot_create_description)/urdf/sensors/ultrasonic_sensor.urdf.xacro" />    
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/ir_opcode_receivers.urdf.xacro" />
   <xacro:include filename="$(find irobot_create_description)/urdf/sensors/optical_mouse.urdf.xacro"/>
   <xacro:include filename="$(find irobot_create_description)/urdf/wheel_with_wheeldrop.urdf.xacro" />
@@ -158,6 +159,22 @@
     <origin xyz="0.12 0 ${0.18 + base_link_z_offset}" rpy="0 0 0"/>
   </xacro:camera_sensor>
 
+  <!-- Ultrasonic sensors -->
+
+  <!-- Front ultrasonic sensor -->
+  <xacro:ultrasonic_sensor name="front" gazebo="$(arg gazebo)" namespace="$(arg namespace)" visualize="true">
+    <origin xyz="0.14 0 ${0.05 + base_link_z_offset}" rpy="0 0 0"/>
+  </xacro:ultrasonic_sensor>
+
+  <!-- Left ultrasonic sensor -->
+  <xacro:ultrasonic_sensor name="front_left" gazebo="$(arg gazebo)" namespace="$(arg namespace)" visualize="true">
+    <origin xyz="0.10 0.10 ${0.05 + base_link_z_offset}" rpy="0 0 ${pi/4}"/>
+  </xacro:ultrasonic_sensor>
+
+  <!-- Right ultrasonic sensor -->
+  <xacro:ultrasonic_sensor name="front_right" gazebo="$(arg gazebo)" namespace="$(arg namespace)" visualize="true">
+    <origin xyz="0.10 -0.10 ${0.05 + base_link_z_offset}" rpy="0 0 ${-pi/4}"/>
+  </xacro:ultrasonic_sensor> 
 
   <!-- Cliffs sensors -->
   <xacro:property name="cliff_z"  value="${-4.5*cm2m}" />
