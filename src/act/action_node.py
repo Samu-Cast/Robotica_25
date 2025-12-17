@@ -4,16 +4,20 @@ from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 from enum import Enum
 
-########    MANCA IL GO HOME perche ancora non definiamo come tornare a casa  #######
+
 
 
 class ActState(Enum):
     STOP = 0
-    EXPLORE = 1
-    TURN_RIGHT = 2
-    SEARCH_VALVE = 3
-    ACTIVATE_VALVE = 4
-    #GO_HOME ?????
+    LEFT = 1
+    FRONT_LEFT = 2
+    FRONT = 3
+    FRONT_RIGHT = 4
+    RIGHT = 5
+    
+    #SEARCH_VALVE = 3
+    #ACTIVATE_VALVE = 4
+    
 
 class ActNode(Node):
 
@@ -59,18 +63,43 @@ class ActNode(Node):
     def plan_callback(self, msg):
         command = msg.data #prende il comando come stringa
 
-        if command == "Explore":
-            self.state = ActState.EXPLORE
-            self.reset_search()
-            self.reset_activate()
-            # self.get_logger().info("PLAN → EXPLORE")
+        if command == "Front":
+            self.state = ActState.FRONT
+            #self.reset_search()
+            #self.reset_activate()
+            # self.get_logger().info("PLAN → FRONT")
 
-        elif command == "Turn_Right":
-            self.state = ActState.TURN_RIGHT
-            self.reset_search()
-            self.reset_activate()
-            # self.get_logger().info("PLAN → TURN_RIGHT") #lo restituisce nei casi in cui il PLAN chiede di girare a destra perche ha trovato un ostacolo
+        elif command == "Right":
+            self.state = ActState.RIGHT
+            #self.reset_search()
+            #self.reset_activate()
+            # self.get_logger().info("PLAN → RIGHT") #lo restituisce nei casi in cui il PLAN chiede di girare a destra perche ha trovato un ostacolo
 
+        elif command == "Left":
+            self.state = ActState.LEFT
+            #self.reset_search()
+            #self.reset_activate()
+            # self.get_logger().info("PLAN → LEFT") #lo restituisce nei casi in cui il PLAN chiede di girare a sinistra perche ha trovato un ostacolo
+        
+        elif command == "FrontLeft":
+            self.state = ActState.FRONT_LEFT
+            #self.reset_search()
+            #self.reset_activate()
+            # self.get_logger().info("PLAN → FRONT_LEFT")
+
+        elif command == "FrontRight":
+            self.state = ActState.FRONT_RIGHT
+            #self.reset_search()
+            #self.reset_activate()
+            # self.get_logger().info("PLAN → FRONT_RIGHT")
+
+        elif command == "Stop":
+            self.state = ActState.STOP
+            #self.reset_search()
+            #self.reset_activate()
+            #self.get_logger().info("PLAN → STOP")
+        
+        '''
         elif command == "SearchValve":
             if self.state != ActState.SEARCH_VALVE:
                 self.search_start_time = self.get_clock().now() #se alla fine lo devo fare io la decisione di quanto dura a cercare
@@ -83,26 +112,35 @@ class ActNode(Node):
                 self.activate_start_time = self.get_clock().now()
                 # self.get_logger().info("PLAN → ACTIVATE_VALVE (inizio attivazione)")
             self.state = ActState.ACTIVATE_VALVE
-
-        elif command == "Stop":
-            self.state = ActState.STOP
-            self.reset_search()
-            self.reset_activate()
-            self.get_logger().info("PLAN → STOP")
+        '''
+        
     
     def control_loop(self):
-        # --- STOP ---
+        # STOP
         if self.state == ActState.STOP:
             self.send_cmd(0.0, 0.0)
 
-        # EXPLORE: avanti continuo
-        elif self.state == ActState.EXPLORE:
+        # FRONT: avanti continuo
+        elif self.state == ActState.FRONT:
             self.send_cmd(0.2, 0.0)
 
-        #TURN_RIGHT: rotazione continua finché PLAN non cambia
-        elif self.state == ActState.TURN_RIGHT:
+        #LEFT: rotazione continua finché PLAN non cambia
+        elif self.state == ActState.LEFT:
+            self.send_cmd(0.0, +0.5)
+        
+        #RIGHT: rotazione continua finché PLAN non cambia
+        elif self.state == ActState.RIGHT:
             self.send_cmd(0.0, -0.5)
+        
+        # FRONT_LEFT: leggermente a sinistra
+        elif self.state == ActState.FRONT_LEFT:
+            self.send_cmd(0.0, 0.25)
+        
+        # FRONT_RIGHT: leggermente a destra
+        elif self.state == ActState.FRONT_RIGHT:
+            self.send_cmd(0.0, -0.25)
 
+    '''
         # SEARCH_VALVE: rotazione continua con memoria 
         elif self.state == ActState.SEARCH_VALVE:
             self.send_cmd(0.0, self.search_angular_speed)
@@ -115,7 +153,7 @@ class ActNode(Node):
                 self.send_cmd(0.0, 0.0)
                 self.state = ActState.STOP
                 self.get_logger().info("Attivazione valvola completata")
-
+    
     
     
     
@@ -131,7 +169,7 @@ class ActNode(Node):
 
     def reset_activate(self):
         self.activate_start_time = None
-
+    '''
 
 
 def main(args=None):
