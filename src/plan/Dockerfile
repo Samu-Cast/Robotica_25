@@ -1,14 +1,24 @@
 FROM ros:jazzy-ros-base
 
-LABEL maintainer="Charlie Team"
-LABEL description="Plan Module - Minimal BT Decision Making"
+USER root
 
-# Install Python dependencies
-RUN pip3 install -r ./requirements.txt --break-system-packages
+ENV ROS_DISTRO=jazzy
 
-# Copy source
-WORKDIR /ros2_ws
-COPY plan_node.py .
+# Copiamo il tuo codice sorgente dentro il container
+WORKDIR /home/ubuntu/plan_ws
 
-# Run
-CMD ["python3", "plan_node.py"]
+# Installiamo dipendenze di sistema 
+RUN apt-get update && apt-get install -y \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Installiamo librerie Python necessarie
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt --break-system-packages
+
+
+#ENTRYPOINT [ "./entrypoint.sh" ]
+
+
+# Avvio del nodo ACT
+#CMD source /opt/ros/jazzy/setup.bash && python3 action_node.py

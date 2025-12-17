@@ -6,9 +6,9 @@ from cv_bridge import CvBridge
 import cv2
 import numpy as np
 
-class ColorShapeDetector(Node):
+class ColorDetector(Node):
     def __init__(self):
-        super().__init__('color_shape_detector')
+        super().__init__('color_detector')
         
         # Sottoscrizione alla camera
         self.subscription = self.create_subscription(
@@ -18,7 +18,7 @@ class ColorShapeDetector(Node):
             10)
         
         # Publisher per il debug (vedrai i rettangoli disegnati qui)
-        self.debug_pub = self.create_publisher(Image, '/camera/processed', 10)
+        self.debug_pub = self.create_publisher(Image, '/camera/color', 10)
         
         self.bridge = CvBridge()
 
@@ -36,7 +36,12 @@ class ColorShapeDetector(Node):
                 'upper': np.array([140, 255, 255]),
                 'draw_color': (255, 0, 0)
             },
-            # Puoi aggiungere 'Rosso', 'Giallo', etc. qui
+            'Rosso': {
+                'lower': np.array([0, 150, 50]),  # Range HSV Rosso
+                'upper': np.array([10, 255, 255]),
+                'draw_color': (0, 0, 255)
+            },
+            # Puoi aggiungere 'Giallo', etc. qui
         }
 
         self.get_logger().info("Nodo Shape Detector avviato!")
@@ -101,7 +106,7 @@ class ColorShapeDetector(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ColorShapeDetector()
+    node = ColorDetector()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -8,6 +8,8 @@ USER root
 # Set environment
 ENV ROS_DISTRO=jazzy
 
+WORKDIR /home/ubuntu/sense_ws
+
 # Installiamo dipendenze di sistema 
 RUN apt-get update && apt-get install -y \
     python3-pip \
@@ -17,16 +19,11 @@ RUN apt-get update && apt-get install -y \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-# Installiamo YOLO e librerie Python necessarie
-# (Ultralytics include già numpy, torch, ecc.)
-RUN pip3 install -r ./requirements.txt --break-system-packages 
+    # Installiamo YOLO e librerie Python necessarie
+    # (Ultralytics include già numpy, torch, ecc.)
+COPY requirements.txt .
+RUN pip3 install -r requirements.txt --break-system-packages 
 
-WORKDIR /home/ubuntu/sense_ws
-
-# Compiliamo il workspace (per rendere visibili i tuoi nodi custom)
-#RUN . /opt/ros/jazzy/setup.sh && colcon build
-
-WORKDIR /home/ubuntu/sense_ws
 
 # Compiliamo il workspace (per rendere visibili i tuoi nodi custom)
 #RUN . /opt/ros/jazzy/setup.sh && colcon build
