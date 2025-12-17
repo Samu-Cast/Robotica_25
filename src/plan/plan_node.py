@@ -11,6 +11,8 @@
 """
 
 import json
+import random
+import random
 try:
     import rclpy
     from rclpy.node import Node
@@ -25,6 +27,18 @@ from py_trees import decorators
 from py_trees.composites import Sequence, Selector, Parallel
 from py_trees.common import Status, ParallelPolicy
 
+##########################################################################
+#DA decidere le posizone e la quantità dei targhet
+KNOW_TARGETS = { 
+    'green': {'x': 2.0, 'y': 3.0, 'theta': 0.0}, #theta è la direzione di arrivo del robot (dove punta) lo facciamo puntare verso il prossimo target 
+    '1': {'x': 2.0, 'y': 3.0, 'theta': 0.0}, #possibilità di di avere taret con numero oltre che colori
+    'blue': {'x': 5.0, 'y': 9.0, 'theta': 1.57},
+    '2': {'x': 5.0, 'y': 9.0, 'theta': 1.57},
+    'red': {'x': 10.0, 'y': 15.0, 'theta': 0.0}, # -> posizione della valvola
+    '3': {'x': 10.0, 'y': 15.0, 'theta': 0.0},
+    # aggiungi altri target qui
+}
+##########################################################################
 
 class BatteryCheck(py_trees.behaviour.Behaviour):
     """Verifica se batteria > 20%"""
@@ -39,56 +53,105 @@ class BatteryCheck(py_trees.behaviour.Behaviour):
 
 
 class GoCharge(py_trees.behaviour.Behaviour):
-    """Vai a ricaricare"""
+    """Vai alla stazione di ricarica e ricarica la batteria"""
     def __init__(self):
         super().__init__(name="GoCharge")
         self.bb = self.attach_blackboard_client(name=self.name)
         self.bb.register_key("battery", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("obstacles", access=py_trees.common.Access.READ)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("goal_pose", access=py_trees.common.Access.WRITE)
     
     def update(self):
-        batt = min(100, self.bb.get("battery") + 30)
-        self.bb.set("battery", batt)
-        self.bb.set("plan_action", "GO_CHARGE")
-        return Status.SUCCESS if batt >= 80 else Status.RUNNING
+        obstacles = self.bb.get("obstacles") or []
+        battery = self.bb.get("battery")
+        
+        #Posizione stazione di ricarica: punto di spawn
+        goal_pose = {
+            'x': 0.0,
+            'y': 0.0,
+            'theta': 3.14159  #π radianti = 180°
+        }
+        self.bb.set("goal_pose", goal_pose)
+        
+        #Evita ostacoli se presenti
+        has_obstacle = any(obs.get('distance', 999) < 0.5 for obs in obstacles)
+        action = "AVOID_OBSTACLE" if has_obstacle else "MOVE_TO_GOAL"
+        self.bb.set("plan_action", action)
+        
+        # Simula ricarica randomizzata
+        carica = random.randint(30, 100 - int(battery))
+        new_battery = min(100, battery + carica)
+        self.bb.set("battery", new_battery)
+        
+        return Status.SUCCESS if new_battery >= 80 else Status.RUNNING
 
 
 class CalculateTarget(py_trees.behaviour.Behaviour):
-    """Seleziona prossimo target"""
+    """Seleziona prossimo target da KNOWN_TARGETS"""
     def __init__(self):
         super().__init__(name="CalculateTarget")
         self.bb = self.attach_blackboard_client(name=self.name)
-        self.bb.register_key("targets", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
         self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
-    
+
     def update(self):
-        targets = self.bb.get("targets")
-        if not targets:
-            return Status.FAILURE
-        target = targets.pop(0)
-        self.bb.set("current_target", target)
-        self.bb.set("targets", targets)
-        return Status.SUCCESS
+        visited = self.bb.get("visited_targets") or []
+
+        # Cerca il primo target non visitato
+        for target_name, target_data in KNOWN_TARGETS.items():
+            if target_name not in visited:
+                # Seleziona questo target
+                self.bb.set("current_target", {
+                    'name': target_name,
+                    'x': target_data['x'],
+                    'y': target_data['y'],
+                    'theta': target_data['theta']
+                })
+                return Status.SUCCESS
+
+        # Tutti i target già visitati
+        return Status.FAILURE
 
 
 class AtTarget(py_trees.behaviour.Behaviour):
-    """Verifica se siamo al target"""
+    """Verifica se siamo al target + reset odometria"""
     def __init__(self):
         super().__init__(name="AtTarget")
         self.bb = self.attach_blackboard_client(name=self.name)
         self.bb.register_key("current_target", access=py_trees.common.Access.READ)
-        self.bb.register_key("room_color", access=py_trees.common.Access.READ)
-    
+        self.bb.register_key("detected_color", access=py_trees.common.Access.READ)  # colore rilevato dalla camera
+        self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("reset_odom", access=py_trees.common.Access.WRITE)  # per resettare odometria
+
     def update(self):
         target = self.bb.get("current_target")
         if not target:
             return Status.FAILURE
         
-        current = self.bb.get("room_color") or [0,0,0]
-        target_color = target.get("color", [0,0,0])
-        diff = sum(abs(c-t) for c,t in zip(current, target_color)) / 3
+        # Verifica colore visivo (rilevato dalla camera)
+        detected_color = self.bb.get("detected_color")  # es: 'green', 'blue', 'red'
+        target_name = target.get("name")  # es: 'green'
         
-        return Status.SUCCESS if diff < 30 else Status.FAILURE
+        if detected_color != target_name:
+            # Colore non corrisponde, non siamo al target
+            return Status.FAILURE
+        
+        # 1. Reset odometria alla posizione nota del target
+        reset_pose = {
+            'x': target['x'],
+            'y': target['y'],
+            'theta': target['theta']
+        }
+        self.bb.set("reset_odom", reset_pose)  # Sense leggerà questo per resettare
+        
+        # 2. Marca target come visitato
+        visited = self.bb.get("visited_targets") or []
+        if target_name not in visited:
+            visited.append(target_name)
+            self.bb.set("visited_targets", visited)
+        
+        return Status.SUCCESS
 
 
 class MoveToTarget(py_trees.behaviour.Behaviour):
@@ -105,9 +168,14 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         obstacles = self.bb.get("obstacles") or []
         target = self.bb.get("current_target")
         
-        # Pubblica goal
-        if target and 'pose' in target:
-            self.bb.set("goal_pose", target['pose'])
+        # Pubblica goal usando coordinate x,y,theta dal target
+        if target and 'x' in target and 'y' in target and 'theta' in target:
+            goal_pose = {
+                'x': target['x'],
+                'y': target['y'],
+                'theta': target['theta']
+            }
+            self.bb.set("goal_pose", goal_pose)
         
         # Decidi azione
         has_obstacle = any(obs.get('distance', 999) < 0.5 for obs in obstacles)
@@ -128,12 +196,13 @@ class SearchObj(py_trees.behaviour.Behaviour):
     def update(self):
         detections = self.bb.get("detections") or {}
         
-        if detections.get("person"):
+        # Priorità: valve > person > obstacle
+        if detections.get("valve"):
+            self.bb.set("found", "valve")
+        elif detections.get("person"):
             self.bb.set("found", "person")
         elif detections.get("obstacle"):
             self.bb.set("found", "obstacle")
-        elif detections.get("valve"):
-            self.bb.set("found", "valve")
         else:
             self.bb.set("found", None)
         
@@ -366,6 +435,7 @@ class PlanNode(Node):
             {'id': 'Room3', 'color': [0,0,255]},
         ])
         self.bb.set("current_target", None)
+        self.bb.set("visited_targets", [])
         self.bb.set("found", None)
         self.bb.set("signals", [])
         self.bb.set("plan_action", "IDLE")
