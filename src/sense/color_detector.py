@@ -1,118 +1,229 @@
 #!/usr/bin/env python3
-import rclpy
-from rclpy.node import Node
-from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
+"""
+Color Detector - Detects colored rectangular targets
+Can be used as a standalone ROS node or as a module
+"""
+
 import cv2
 import numpy as np
 
-class ColorDetector(Node):
-    def __init__(self):
-        super().__init__('color_detector')
-        
-        # Sottoscrizione alla camera
-        self.subscription = self.create_subscription(
-            Image,
-            '/camera_front/image',
-            self.listener_callback,
-            10)
-        
-        # Publisher per il debug (vedrai i rettangoli disegnati qui)
-        self.debug_pub = self.create_publisher(Image, '/camera/color', 10)
-        
-        self.bridge = CvBridge()
 
-        # --- CONFIGURAZIONE COLORI ---
-        # Definisci qui i colori che vuoi cercare in formato HSV.
-        # Format: 'nome': {'lower': (H, S, V), 'upper': (H, S, V), 'text_color': (B, G, R)}
+class ColorDetector:
+    """
+    Detects colored rectangular targets in images
+    """
+    
+    def __init__(self):
+        # Color detection parameters (HSV ranges)
         self.target_colors = {
-            'Verde': {
-                'lower': np.array([40, 50, 50]),   # Range HSV Verde
+            'green': {
+                'lower': np.array([40, 50, 50]),
                 'upper': np.array([80, 255, 255]),
-                'draw_color': (0, 255, 0)          # Colore rettangolo (BGR)
+                'draw_color': (0, 255, 0)
             },
-            'Blu': {
-                'lower': np.array([100, 150, 0]),  # Range HSV Blu
+            'blue': {
+                'lower': np.array([100, 150, 0]),
                 'upper': np.array([140, 255, 255]),
                 'draw_color': (255, 0, 0)
             },
-            'Rosso': {
-                'lower': np.array([0, 150, 50]),  # Range HSV Rosso
+            'red': {
+                'lower': np.array([0, 150, 50]),
                 'upper': np.array([10, 255, 255]),
                 'draw_color': (0, 0, 255)
             },
-            # Puoi aggiungere 'Giallo', etc. qui
         }
-
-        self.get_logger().info("Nodo Shape Detector avviato!")
-
-    def listener_callback(self, msg):
-        try:
-            # 1. Converti ROS Image -> OpenCV
-            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        self.min_area = 1000  # Minimum contour area to consider
+    
+    def detect(self, frame):
+        """
+        Detect colored targets in frame
+        
+        Args:
+            frame: numpy array (BGR image from OpenCV)
             
-            # 2. Pre-processing (Fondamentale per le forme)
-            # Sfocare leggermente l'immagine rimuove il rumore e rende i lati dei rettangoli più dritti
+        Returns:
+            dict: {
+                'colors_detected': list of color names found,
+                'main_color': str or None (largest detected color),
+                'targets': [
+                    {
+                        'color': str,
+                        'area': int,
+                        'bbox': [x, y, w, h],
+                        'center': (cx, cy),
+                        'is_rectangle': bool
+                    },
+                    ...
+                ]
+            }
+        """
+        if frame is None:
+            return self._empty_result()
+        
+        try:
+            # Pre-processing
             blurred = cv2.GaussianBlur(frame, (5, 5), 0)
             hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-
-            # 3. Cicla per ogni colore che vogliamo cercare
+            
+            targets = []
+            colors_detected = set()
+            
             for color_name, params in self.target_colors.items():
-                
-                # A. Crea la maschera per il colore specifico
+                # Create mask for this color
                 mask = cv2.inRange(hsv, params['lower'], params['upper'])
                 
-                # Pulizia maschera (Erosione + Dilatazione) per togliere puntini bianchi
-                kernel = np.ones((5,5), np.uint8)
+                # Clean up mask
+                kernel = np.ones((5, 5), np.uint8)
                 mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-
-                # B. Trova i contorni nella maschera
+                
+                # Find contours
                 contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
+                
                 for cnt in contours:
                     area = cv2.contourArea(cnt)
                     
-                    # Filtro area minima (ignora oggetti troppo piccoli/lontani)
-                    if area > 1000:
-                        
-                        # C. Approssimazione Poligonale (Il trucco per le forme)
-                        # Calcola il perimetro
+                    if area > self.min_area:
+                        # Approximate polygon
                         perimeter = cv2.arcLength(cnt, True)
-                        # Approssima il contorno a una figura geometrica semplice
-                        # 0.02 * perimeter è la precisione (epsilon)
                         approx = cv2.approxPolyDP(cnt, 0.02 * perimeter, True)
-
-                        # D. Logica Rettangolo: Se ha 4 vertici è un quadrilatero
-                        if len(approx) == 4:
-                            # Ottieni le coordinate del rettangolo per disegnarlo
-                            x, y, w, h = cv2.boundingRect(approx)
-                            
-                            # Disegna il rettangolo
-                            cv2.rectangle(frame, (x, y), (x + w, y + h), params['draw_color'], 3)
-                            
-                            # Scrivi il nome del colore
-                            cv2.putText(frame, f"{color_name} Rec", (x, y - 10),
-                                      cv2.FONT_HERSHEY_SIMPLEX, 0.9, params['draw_color'], 2)
-
-                            # Logga l'evento (utile per far decidere al robot cosa fare)
-                            self.get_logger().info(f"Trovato rettangolo {color_name} a dist stimata (area): {area}")
-
-            # 4. Pubblica l'immagine elaborata
-            out_msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
-            self.debug_pub.publish(out_msg)
-
+                        
+                        # Check if it's a rectangle (4 vertices)
+                        is_rectangle = len(approx) == 4
+                        
+                        # Get bounding box
+                        x, y, w, h = cv2.boundingRect(cnt)
+                        cx = x + w // 2
+                        cy = y + h // 2
+                        
+                        targets.append({
+                            'color': color_name,
+                            'area': area,
+                            'bbox': [x, y, w, h],
+                            'center': (cx, cy),
+                            'is_rectangle': is_rectangle
+                        })
+                        
+                        colors_detected.add(color_name)
+            
+            # Sort by area (largest first)
+            targets.sort(key=lambda x: x['area'], reverse=True)
+            
+            # Main color is the largest target
+            main_color = targets[0]['color'] if targets else None
+            
+            return {
+                'colors_detected': list(colors_detected),
+                'main_color': main_color,
+                'targets': targets
+            }
+            
         except Exception as e:
-            self.get_logger().error(f'Errore processing: {str(e)}')
+            print(f"Color detection error: {e}")
+            return self._empty_result()
+    
+    def _empty_result(self):
+        """Return empty detection result"""
+        return {
+            'colors_detected': [],
+            'main_color': None,
+            'targets': []
+        }
+    
+    def draw_detections(self, frame, results):
+        """
+        Draw bounding boxes on frame
+        
+        Args:
+            frame: Original frame
+            results: Detection results from detect()
+            
+        Returns:
+            frame with boxes drawn
+        """
+        annotated = frame.copy()
+        
+        for target in results.get('targets', []):
+            x, y, w, h = target['bbox']
+            color_name = target['color']
+            
+            # Get draw color
+            draw_color = self.target_colors.get(color_name, {}).get('draw_color', (255, 255, 255))
+            
+            # Draw rectangle
+            cv2.rectangle(annotated, (x, y), (x + w, y + h), draw_color, 2)
+            
+            # Draw label
+            label = f"{color_name}"
+            if target['is_rectangle']:
+                label += " [Rect]"
+            cv2.putText(annotated, label, (x, y - 10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, draw_color, 2)
+        
+        return annotated
+
+
+# Singleton instance for easy import
+_detector_instance = None
+
+def get_color_detector():
+    """Get singleton instance of ColorDetector"""
+    global _detector_instance
+    if _detector_instance is None:
+        _detector_instance = ColorDetector()
+    return _detector_instance
+
+
+# === ROS2 Node (optional, for standalone use) ===
 
 def main(args=None):
+    """Run as standalone ROS2 node"""
+    import rclpy
+    from rclpy.node import Node
+    from sensor_msgs.msg import Image
+    from cv_bridge import CvBridge
+    
+    class ColorDetectorNode(Node):
+        def __init__(self):
+            super().__init__('color_detector')
+            
+            self.detector = ColorDetector()
+            self.bridge = CvBridge()
+            
+            self.subscription = self.create_subscription(
+                Image,
+                '/camera_front/image',
+                self.callback,
+                10
+            )
+            
+            self.debug_pub = self.create_publisher(Image, '/camera/color', 10)
+            self.get_logger().info("Color Detector Node started")
+        
+        def callback(self, msg):
+            try:
+                frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+                results = self.detector.detect(frame)
+                
+                if results['main_color']:
+                    self.get_logger().info(f"Detected: {results['colors_detected']}")
+                
+                # Publish debug image
+                annotated = self.detector.draw_detections(frame, results)
+                out_msg = self.bridge.cv2_to_imgmsg(annotated, encoding='bgr8')
+                self.debug_pub.publish(out_msg)
+                
+            except Exception as e:
+                self.get_logger().error(f'Error: {e}')
+    
     rclpy.init(args=args)
-    node = ColorDetector()
+    node = ColorDetectorNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     node.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

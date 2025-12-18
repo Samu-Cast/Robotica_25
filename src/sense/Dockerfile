@@ -7,6 +7,7 @@ USER root
 
 # Set environment
 ENV ROS_DISTRO=jazzy
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /home/ubuntu/sense_ws
 
@@ -14,22 +15,22 @@ WORKDIR /home/ubuntu/sense_ws
 RUN apt-get update && apt-get install -y \
     python3-pip \
     libglib2.0-0 \
+    libgl1-mesa-glx \
+    libglib2.0-dev \
     ros-jazzy-cv-bridge \
     ros-jazzy-vision-opencv \
     sudo \
     && rm -rf /var/lib/apt/lists/*
 
-    # Installiamo YOLO e librerie Python necessarie
-    # (Ultralytics include già numpy, torch, ecc.)
+# Installiamo YOLO e librerie Python necessarie
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt --break-system-packages 
 
+# Copia entrypoint
+COPY ./entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Compiliamo il workspace (per rendere visibili i tuoi nodi custom)
-#RUN . /opt/ros/jazzy/setup.sh && colcon build
+ENTRYPOINT ["/entrypoint.sh"]
 
-# Configurazione ambiente
-#COPY ./entrypoint.sh /
-#ENTRYPOINT ["./entrypoint.sh"]
-
-#CMD ["ros2", "run", "tuo_pacchetto", "yolo_node"]
+# Default command: avvia sense_node
+CMD ["python3", "sense_node.py"]

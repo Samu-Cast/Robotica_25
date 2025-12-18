@@ -404,7 +404,8 @@ class PlanNode(Node):
         # Blackboard keys
         for key in ['battery', 'obstacles', 'detections', 'room_color', 'home_color',
                     'targets', 'current_target', 'found', 'signals', 'plan_action', 
-                    'goal_pose', 'mission_complete']:
+                    'goal_pose', 'mission_complete', 'detected_color', 
+                    'robot_x', 'robot_y', 'robot_theta', 'visited_targets', 'reset_odom']:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
         
         self._init_blackboard()
@@ -441,16 +442,41 @@ class PlanNode(Node):
         self.bb.set("plan_action", "IDLE")
         self.bb.set("goal_pose", None)
         self.bb.set("mission_complete", False)
+        # New fields for odometry and color detection
+        self.bb.set("detected_color", None)
+        self.bb.set("robot_x", 0.0)
+        self.bb.set("robot_y", 0.0)
+        self.bb.set("robot_theta", 0.0)
+        self.bb.set("reset_odom", None)
     
     def _world_cb(self, msg):
         """Riceve world state da Sense"""
         try:
             data = json.loads(msg.data)
+            
+            # Obstacles from ultrasonic sensors
             self.bb.set("obstacles", data.get("obstacles", []))
+            
+            # Detections (person, valve, fire, obstacle)
             self.bb.set("detections", data.get("detections", {}))
+            
+            # Battery level
             self.bb.set("battery", data.get("battery", 100.0))
-            if 'room_color' in data:
-                self.bb.set("room_color", data['room_color'])
+            
+            # Detected color (main target color)
+            self.bb.set("detected_color", data.get("detected_color", None))
+            
+            # Odometry / Robot position
+            odom = data.get("odometry", {})
+            self.bb.set("robot_x", odom.get("x", 0.0))
+            self.bb.set("robot_y", odom.get("y", 0.0))
+            self.bb.set("robot_theta", odom.get("theta", 0.0))
+            
+            # Room color (from colors list if available)
+            colors = data.get("colors", [])
+            if colors:
+                self.bb.set("room_color", colors[0].get("color", None))
+            
         except json.JSONDecodeError:
             pass
     
