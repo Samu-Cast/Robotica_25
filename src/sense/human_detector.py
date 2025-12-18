@@ -1,6 +1,7 @@
 """
-Human Detector - Uses YOLO model trained on humans
-Uses the model from YOLO/humanDetection/best.pt
+Human Detector - Uses YOLOv8 Nano (lightest model)
+Downloads automatically on first use (~6MB)
+Detects "person" class from COCO dataset
 """
 
 import os
@@ -16,13 +17,16 @@ except ImportError:
 
 class HumanDetector:
     """
-    YOLO-based human detector using custom trained model
+    YOLO-based human detector using YOLOv8 Nano (lightweight)
     """
     
-    def __init__(self, model_path=None, conf_threshold=0.5):
+    # COCO class ID for person
+    PERSON_CLASS_ID = 0
+    
+    def __init__(self, model_name='yolov8n.pt', conf_threshold=0.5):
         """
         Args:
-            model_path: Path to YOLO model weights (best.pt)
+            model_name: YOLO model name (downloads automatically if not present)
             conf_threshold: Confidence threshold for detections
         """
         self.conf_threshold = conf_threshold
@@ -31,23 +35,14 @@ class HumanDetector:
         if not YOLO_AVAILABLE:
             return
         
-        # Find model path
-        if model_path is None:
-            # Default path relative to this file
-            current_dir = Path(__file__).parent
-            model_path = current_dir / 'YOLO' / 'humanDetection' / 'best.pt'
-        
-        model_path = Path(model_path)
-        
-        if model_path.exists():
-            try:
-                self.model = YOLO(str(model_path))
-                print(f"Human detector loaded: {model_path}")
-            except Exception as e:
-                print(f"Error loading YOLO model: {e}")
-                self.model = None
-        else:
-            print(f"Warning: Model not found at {model_path}")
+        try:
+            # YOLOv8 Nano - smallest and fastest, ~6MB
+            # Downloads automatically on first use
+            self.model = YOLO(model_name)
+            print(f"Human detector loaded: {model_name}")
+        except Exception as e:
+            print(f"Error loading YOLO model: {e}")
+            self.model = None
     
     def detect(self, frame):
         """
@@ -73,8 +68,13 @@ class HumanDetector:
             return self._empty_result()
         
         try:
-            # Run YOLO inference
-            results = self.model(frame, conf=self.conf_threshold, verbose=False)
+            # Run YOLO inference - filter for person class only
+            results = self.model(
+                frame, 
+                conf=self.conf_threshold, 
+                classes=[self.PERSON_CLASS_ID],  # Only detect persons
+                verbose=False
+            )
             
             persons = []
             for result in results:
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     import cv2
     import numpy as np
     
-    print("Testing Human Detector...")
+    print("Testing Human Detector with YOLOv8 Nano...")
     detector = HumanDetector()
     
     # Test with dummy image

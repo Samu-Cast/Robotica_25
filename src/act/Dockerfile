@@ -17,8 +17,11 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt --break-system-packages
 
+# Aggiungi il source di ROS2 al .bashrc per le sessioni interattive
+RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/ubuntu/.bashrc
 
-#ENTRYPOINT [ "./entrypoint.sh" ]
+# Passa all'utente ubuntu per l'esecuzione
+USER ubuntu
 
 # Avvio del nodo ACT
-#CMD source /opt/ros/jazzy/setup.bash && python3 action_node.py
+CMD ["bash"]
