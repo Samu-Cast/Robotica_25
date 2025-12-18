@@ -42,17 +42,20 @@ class TestPlanBehaviors:
             'current_target', 'visited_targets', 'found', 'signals', 
             'plan_action', 'goal_pose', 'mission_complete', 'detected_color',
             'reset_odom', 'distance_left', 'distance_center', 'distance_right',
-            'robot_position'
+            'robot_position', 'yolo_valve'
         ]
         for key in keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
         
-        # Inizializza i nuovi sensori con valori di default
+        # Inizializza con valori di default
         self.bb.set("distance_left", 999.0)
         self.bb.set("distance_center", 999.0)
         self.bb.set("distance_right", 999.0)
         self.bb.set("detected_color", None)
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
+        self.bb.set("visited_targets", [])
+        self.bb.set("yolo_valve", False)
+        self.bb.set("reset_odom", None)
     
     def teardown_method(self):
         """Cleanup dopo ogni test"""
@@ -207,14 +210,18 @@ class TestPlanBehaviors:
         print("✓ Ritorna FAILURE quando tutti i target sono visitati")
     
     def test_at_target_correct_color(self):
-        """Test AtTarget - colore corretto rilevato"""
-        print("\n[TEST] AtTarget - Colore corretto")
+        """Test AtTarget - wall alignment and valve check"""
+        print("\n[TEST] AtTarget - Aligned and red = valve")
         
-        # Setup
-        target = {'name': 'green', 'x': 2.0, 'y': 3.0, 'theta': 0.0}
+        # Setup - robot near wall, aligned (left == right), red color
+        target = {'name': 'red', 'x': 10.0, 'y': 15.0, 'theta': 0.0}
         self.bb.set("current_target", target)
-        self.bb.set("detected_color", "green")
+        self.bb.set("detected_color", "red")
+        self.bb.set("distance_center", 0.5)  # Near wall
+        self.bb.set("distance_left", 0.6)    # Aligned
+        self.bb.set("distance_right", 0.6)   # Aligned
         self.bb.set("visited_targets", [])
+        self.bb.set("yolo_valve", True)       # YOLO confirms valve
         behavior = AtTarget()
         behavior.setup_with_descendants()
         
@@ -224,22 +231,25 @@ class TestPlanBehaviors:
         # Verify
         visited = self.bb.get("visited_targets")
         reset_odom = self.bb.get("reset_odom")
+        found = self.bb.get("found")
         
         assert status == Status.SUCCESS, f"Expected SUCCESS, got {status}"
-        assert "green" in visited, "Target non marcato come visitato"
-        assert reset_odom == {'x': 2.0, 'y': 3.0, 'theta': 0.0}, "Reset odometria errato"
+        assert "red" in visited, "Target non marcato come visitato"
+        assert found == "valve", "Dovrebbe trovare valvola"
         
-        print("✓ Target 'green' marcato come visitato")
-        print(f"✓ Odometria resettata a: {reset_odom}")
+        print("✓ Target 'red' marcato come visitato")
+        print(f"✓ Found: {found}")
     
-    def test_at_target_wrong_color(self):
-        """Test AtTarget - colore errato rilevato"""
-        print("\n[TEST] AtTarget - Colore errato")
+    def test_at_target_not_aligned(self):
+        """Test AtTarget - robot not aligned with wall"""
+        print("\n[TEST] AtTarget - Non allineato")
         
-        # Setup
+        # Setup - robot near wall but not aligned
         target = {'name': 'green', 'x': 2.0, 'y': 3.0, 'theta': 0.0}
         self.bb.set("current_target", target)
-        self.bb.set("detected_color", "blue")  # Colore sbagliato
+        self.bb.set("distance_center", 0.5)  # Near wall
+        self.bb.set("distance_left", 0.3)    # Not aligned
+        self.bb.set("distance_right", 0.8)   # Not aligned
         self.bb.set("visited_targets", [])
         behavior = AtTarget()
         behavior.setup_with_descendants()
@@ -247,20 +257,20 @@ class TestPlanBehaviors:
         # Execute
         status = behavior.update()
         
-        # Verify
-        visited = self.bb.get("visited_targets")
-        assert status == Status.FAILURE, f"Expected FAILURE, got {status}"
-        assert "green" not in visited, "Target non dovrebbe essere marcato"
+        # Verify - should return RUNNING while aligning
+        action = self.bb.get("plan_action")
+        assert status == Status.RUNNING, f"Expected RUNNING, got {status}"
+        assert action in ["TURN_LEFT", "TURN_RIGHT"], f"Expected turn action, got {action}"
         
-        print("✓ Ritorna FAILURE con colore errato (rilevato 'blue', atteso 'green')")
+        print(f"✓ Robot si sta allineando: {action}")
     
     def test_move_to_target(self):
-        """Test MoveToTarget - movimento verso target"""
-        print("\n[TEST] MoveToTarget - Movimento base")
+        """Test MoveToTarget - calculates closest target"""
+        print("\n[TEST] MoveToTarget - Closest target calculation")
         
-        # Setup
-        target = {'name': 'blue', 'x': 5.0, 'y': 9.0, 'theta': 1.57}
-        self.bb.set("current_target", target)
+        # Setup - robot at origin, should go to closest target (green at 2,3)
+        self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
+        self.bb.set("visited_targets", [])
         self.bb.set("obstacles", [])
         behavior = MoveToTarget()
         behavior.setup_with_descendants()
@@ -271,13 +281,15 @@ class TestPlanBehaviors:
         # Verify
         goal_pose = self.bb.get("goal_pose")
         action = self.bb.get("plan_action")
+        current_target = self.bb.get("current_target")
         
         assert status == Status.RUNNING, f"Expected RUNNING, got {status}"
-        assert goal_pose == {'x': 5.0, 'y': 9.0, 'theta': 1.57}, "Goal pose errato"
-        # Con sensori a 999.0 (tutti liberi), dovrebbe andare dritto
-        assert action == "MOVE_FORWARD", f"Expected MOVE_FORWARD, got {action}"
+        # Closest target from origin is 'green' at (2,3)
+        assert current_target['name'] == 'green', f"Expected closest 'green', got {current_target['name']}"
+        assert goal_pose == {'x': 2.0, 'y': 3.0, 'theta': 0.0}, f"Goal pose errato: {goal_pose}"
         
-        print(f"✓ Goal pose impostato: {goal_pose}")
+        print(f"✓ Closest target selected: {current_target['name']}")
+        print(f"✓ Goal pose: {goal_pose}")
         print(f"✓ Action: {action}")
     
     def test_move_to_target_with_obstacle(self):

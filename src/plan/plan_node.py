@@ -40,18 +40,14 @@ from py_trees.common import Status, ParallelPolicy
 ##########################################################################
 # KNOWN TARGETS CONFIGURATION
 # Define the map locations and their coordinates
+# Robot does NOT know which target is the valve - must check each one
 # theta = robot orientation at arrival (radians, 0 = facing right, π/2 = facing up)
 ##########################################################################
 KNOWN_TARGETS = {
-    # Color-based targets (detected by camera)
+    # Color-based targets - robot will visit these and check for valve
     'green': {'x': 2.0, 'y': 3.0, 'theta': 0.0},
     'blue': {'x': 5.0, 'y': 9.0, 'theta': 1.57},
-    'red': {'x': 10.0, 'y': 15.0, 'theta': 0.0},  # Valve location
-    
-    # Numeric aliases (alternative target identification)
-    '1': {'x': 2.0, 'y': 3.0, 'theta': 0.0},
-    '2': {'x': 5.0, 'y': 9.0, 'theta': 1.57},
-    '3': {'x': 10.0, 'y': 15.0, 'theta': 0.0},
+    'red': {'x': 10.0, 'y': 15.0, 'theta': 0.0},  # This is actually the valve, but robot doesn't know
 }
 ##########################################################################
 
@@ -84,6 +80,119 @@ def calculate_best_direction(distance_left, distance_center, distance_right, thr
     else:
         # All sensors blocked - generic obstacle avoidance
         return 'AVOID_OBSTACLE'
+
+
+def calculate_closest_target(robot_pos, visited_targets):
+    """
+    Find the closest unvisited target from KNOWN_TARGETS.
+    
+    Args:
+        robot_pos: Dict with robot position {'x': float, 'y': float, 'theta': float}
+        visited_targets: List of already visited target names
+    
+    Returns:
+        Dict with target info {'name', 'x', 'y', 'theta', 'distance'} or None if all visited
+    """
+    import math
+    
+    robot_x = robot_pos.get('x', 0.0)
+    robot_y = robot_pos.get('y', 0.0)
+    
+    closest = None
+    min_distance = float('inf')
+    
+    # Only consider unique positions (avoid duplicates like 'green' and '1')
+    seen_positions = set()
+    
+    for target_name, target_data in KNOWN_TARGETS.items():
+        # Skip visited targets
+        if target_name in visited_targets:
+            continue
+        
+        # Skip duplicate positions
+        pos_key = (target_data['x'], target_data['y'])
+        if pos_key in seen_positions:
+            continue
+        seen_positions.add(pos_key)
+        
+        # Calculate Euclidean distance
+        dx = target_data['x'] - robot_x
+        dy = target_data['y'] - robot_y
+        distance = math.sqrt(dx**2 + dy**2)
+        
+        if distance < min_distance:
+            min_distance = distance
+            closest = {
+                'name': target_name,
+                'x': target_data['x'],
+                'y': target_data['y'],
+                'theta': target_data['theta'],
+                'distance': distance
+            }
+    
+    return closest
+
+
+def calculate_direction_to_target(robot_pos, target):
+    """
+    Calculate the steering direction to reach target.
+    
+    Args:
+        robot_pos: Dict {'x', 'y', 'theta'} - current robot position and orientation
+        target: Dict {'x', 'y'} - target position
+    
+    Returns:
+        str: 'MOVE_FORWARD', 'TURN_LEFT', or 'TURN_RIGHT'
+    """
+    import math
+    
+    robot_x = robot_pos.get('x', 0.0)
+    robot_y = robot_pos.get('y', 0.0)
+    robot_theta = robot_pos.get('theta', 0.0)
+    
+    # Calculate angle to target
+    dx = target['x'] - robot_x
+    dy = target['y'] - robot_y
+    target_angle = math.atan2(dy, dx)
+    
+    # Calculate angle difference (normalize to -π to π)
+    angle_diff = target_angle - robot_theta
+    while angle_diff > math.pi:
+        angle_diff -= 2 * math.pi
+    while angle_diff < -math.pi:
+        angle_diff += 2 * math.pi
+    
+    # Decide action based on angle difference
+    angle_threshold = 0.15  # ~8.5 degrees tolerance
+    
+    if abs(angle_diff) < angle_threshold:
+        return 'MOVE_FORWARD'
+    elif angle_diff > 0:
+        return 'TURN_LEFT'
+    else:
+        return 'TURN_RIGHT'
+
+
+def check_wall_alignment(distance_left, distance_right, threshold=0.05):
+    """
+    Check if robot is aligned with wall (facing straight).
+    
+    When left and right sensors read approximately the same distance,
+    the robot is perpendicular to the wall.
+    
+    Args:
+        distance_left: Left sensor reading (meters)
+        distance_right: Right sensor reading (meters)
+        threshold: Maximum allowed difference (default 0.05m = 5cm)
+    
+    Returns:
+        bool: True if aligned, False otherwise
+    """
+    if distance_left is None or distance_right is None:
+        return False
+    
+    diff = abs(distance_left - distance_right)
+    return diff <= threshold
 
 
 # ============================================================================
@@ -191,10 +300,13 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
 
 class AtTarget(py_trees.behaviour.Behaviour):
     """
-    Check if robot has arrived at current target using camera color detection.
-    When target is reached:
-    1. Resets odometry to known target position (corrects drift)
-    2. Marks target as visited
+    Check if robot has arrived at target and verify if it's the valve.
+    
+    Logic:
+    1. Check if near target (sensors detecting wall)
+    2. Align robot with wall (left == right distance)
+    3. Check if detected_color == red (valve)
+    4. If valve → SUCCESS, else mark visited and continue
     """
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -203,21 +315,45 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
         self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
         self.bb.register_key("reset_odom", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("found", access=py_trees.common.Access.WRITE)
 
     def update(self):
         target = self.bb.get("current_target")
         if not target:
             return Status.FAILURE
         
-        # Check if detected color matches target name
+        # Read distance sensors
+        dist_left = self.bb.get("distance_left")
+        dist_right = self.bb.get("distance_right")
+        dist_center = self.bb.get("distance_center")
+        
+        # Step 1: Check if we're near target (center sensor detects wall)
+        near_wall_threshold = 0.8  # meters
+        if dist_center is None or dist_center > near_wall_threshold:
+            # Not near target yet
+            return Status.FAILURE
+        
+        # Step 2: Check wall alignment (left == right)
+        if not check_wall_alignment(dist_left, dist_right, threshold=0.08):
+            # Not aligned - adjust robot orientation
+            if dist_left is not None and dist_right is not None:
+                if dist_left > dist_right:
+                    self.bb.set("plan_action", "TURN_LEFT")
+                else:
+                    self.bb.set("plan_action", "TURN_RIGHT")
+            return Status.RUNNING
+        
+        # Step 3: Aligned! Stop and check color
+        self.bb.set("plan_action", "STOP")
+        
         detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
         
-        if detected_color != target_name:
-            # Color doesn't match - not at target yet
-            return Status.FAILURE
-        
-        # Step 1: Reset odometry to known target position
+        # Reset odometry to known target position
         reset_pose = {
             'x': target['x'],
             'y': target['y'],
@@ -225,56 +361,89 @@ class AtTarget(py_trees.behaviour.Behaviour):
         }
         self.bb.set("reset_odom", reset_pose)
         
-        # Step 2: Mark target as visited
+        # Mark target as visited
         visited = self.bb.get("visited_targets") or []
         if target_name not in visited:
             visited.append(target_name)
             self.bb.set("visited_targets", visited)
         
+        # Step 4: Check if this is the valve (red color)
+        if detected_color == "red":
+            # FOUND THE VALVE!
+            self.bb.set("found", "valve")
+            return Status.SUCCESS
+        
+        # Not the valve - continue to next target
         return Status.SUCCESS
 
 
 class MoveToTarget(py_trees.behaviour.Behaviour):
     """
-    Navigate towards current target using 3-sensor direction calculation.
-    Sets goal_pose and plan_action based on sensor readings.
-    Always returns RUNNING as movement is continuous.
+    Navigate towards closest target using odometry-based direction.
+    
+    Logic:
+    - If sensors detect nearby obstacles → use obstacle avoidance
+    - If no obstacles → calculate direction to closest target using odometry
     """
     def __init__(self):
         super().__init__(name="MoveToTarget")
         self.bb = self.attach_blackboard_client(name=self.name)
         
-        # Write access for action and goal
+        # Write access for action, goal, current_target
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("goal_pose", access=py_trees.common.Access.WRITE)
-        self.bb.register_key("current_target", access=py_trees.common.Access.READ)
+        self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         
-        # Read access for distance sensors
+        # Read access for sensors and position
         self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("visited_targets", access=py_trees.common.Access.READ)
     
     def update(self):
-        target = self.bb.get("current_target")
-        
-        # Read distance sensors
+        # Read distance sensors (default to large value = no obstacle)
         distance_left = self.bb.get("distance_left") or 999.0
         distance_center = self.bb.get("distance_center") or 999.0
         distance_right = self.bb.get("distance_right") or 999.0
         
-        # Publish goal pose from target coordinates
-        if target and 'x' in target and 'y' in target and 'theta' in target:
-            goal_pose = {
-                'x': target['x'],
-                'y': target['y'],
-                'theta': target['theta']
-            }
-            self.bb.set("goal_pose", goal_pose)
+        # Get robot position and visited targets
+        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        visited = self.bb.get("visited_targets") or []
         
-        # Calculate optimal direction based on 3 sensors
-        action = calculate_best_direction(distance_left, distance_center, distance_right)
+        # Calculate closest unvisited target
+        closest = calculate_closest_target(robot_pos, visited)
+        
+        if not closest:
+            # All targets visited, go home
+            self.bb.set("plan_action", "STOP")
+            return Status.SUCCESS
+        
+        # Set current target
+        self.bb.set("current_target", closest)
+        
+        # Set goal pose
+        goal_pose = {
+            'x': closest['x'],
+            'y': closest['y'],
+            'theta': closest['theta']
+        }
+        self.bb.set("goal_pose", goal_pose)
+        
+        # Check if obstacles nearby (need avoidance)
+        obstacle_threshold = 0.6  # meters
+        obstacles_nearby = (distance_center < obstacle_threshold or 
+                           distance_left < obstacle_threshold or 
+                           distance_right < obstacle_threshold)
+        
+        if obstacles_nearby:
+            # Use sensor-based obstacle avoidance
+            action = calculate_best_direction(distance_left, distance_center, distance_right)
+        else:
+            # No obstacles - calculate direction to target using odometry
+            action = calculate_direction_to_target(robot_pos, closest)
+        
         self.bb.set("plan_action", action)
-        
         return Status.RUNNING
 
 
@@ -573,7 +742,7 @@ class PlanNode(Node):
             'battery', 'obstacles', 'detections', 'targets',
             'current_target', 'visited_targets', 'found', 'signals',
             'plan_action', 'goal_pose', 'mission_complete',
-            'detected_color', 'reset_odom',
+            'detected_color', 'reset_odom',  # removed yolo_valve
             'distance_left', 'distance_center', 'distance_right',
             'robot_position'
         ]
@@ -584,9 +753,17 @@ class PlanNode(Node):
         self._init_blackboard()
         self.tree.setup_with_descendants()
         
-        # ROS2 Subscriptions
+        # ROS2 Subscriptions - Multiple topics for different data
+        # /sense/world_state - general data (obstacles, battery)
         self.create_subscription(String, '/sense/world_state', self._world_cb, 10)
+        # /sense/robot_position - odometry position {x, y, theta}
+        self.create_subscription(String, '/sense/robot_position', self._position_cb, 10)
+        # /sense/distances - 3 distance sensors {left, center, right}
+        self.create_subscription(String, '/sense/distances', self._distances_cb, 10)
+        # /sense/detections - YOLO detections {detected_color, yolo_valve, person, obstacle}
+        self.create_subscription(String, '/sense/detections', self._detections_cb, 10)
         
+        ##TODO: Update with actual formats from Giam and Sal implementation
         # ROS2 Publishers
         self.action_pub = self.create_publisher(String, '/plan/action', 10)
         self.goal_pub = self.create_publisher(String, '/plan/goal_pose', 10)
@@ -641,27 +818,70 @@ class PlanNode(Node):
             
             # Battery level
             self.bb.set("battery", data.get("battery", 100.0))
-            
-            # Distance sensors (3 sensors: left, center, right)
-            if 'distance_left' in data:
-                self.bb.set("distance_left", data['distance_left'])
-            if 'distance_center' in data:
-                self.bb.set("distance_center", data['distance_center'])
-            if 'distance_right' in data:
-                self.bb.set("distance_right", data['distance_right'])
-            
-            # Color detected by camera
-            if 'detected_color' in data:
-                self.bb.set("detected_color", data['detected_color'])
-            
-            # Robot position from odometry
-            if 'robot_position' in data:
-                self.bb.set("robot_position", data['robot_position'])
                 
         except json.JSONDecodeError as e:
             self.get_logger().warn(f"Failed to parse world_state: {e}")
         except Exception as e:
             self.get_logger().error(f"Error in _world_cb: {e}")
+    
+    def _position_cb(self, msg):
+        """
+        Callback for /sense/robot_position topic.
+        Receives robot odometry position: {x, y, theta}
+        """
+        try:
+            data = json.loads(msg.data)
+            self.bb.set("robot_position", data)
+        except json.JSONDecodeError as e:
+            self.get_logger().warn(f"Failed to parse robot_position: {e}")
+    
+    def _distances_cb(self, msg):
+        """
+        Callback for /sense/distances topic.
+        Receives 3 distance sensor readings: {left, center, right}
+        """
+        try:
+            data = json.loads(msg.data)
+            if 'left' in data:
+                self.bb.set("distance_left", data['left'])
+            if 'center' in data:
+                self.bb.set("distance_center", data['center'])
+            if 'right' in data:
+                self.bb.set("distance_right", data['right'])
+        except json.JSONDecodeError as e:
+            self.get_logger().warn(f"Failed to parse distances: {e}")
+    
+    def _detections_cb(self, msg):
+        """
+        Callback for /sense/detections topic.
+        Receives YOLO detections: {detected_color, person}
+        
+        Detection logic:
+        - detected_color: "red" = valve (mission objective), others = normal targets
+        - person: True if YOLO detects a person
+        - obstacle: inferred from distance sensors (no explicit detection needed)
+        """
+        try:
+            data = json.loads(msg.data)
+            
+            # Color detected by camera (red = valve)
+            if 'detected_color' in data:
+                self.bb.set("detected_color", data['detected_color'])
+                # If red, we found the valve!
+                if data['detected_color'] == "red":
+                    self.bb.set("found", "valve")
+            
+            # Person detection from YOLO
+            detections = {}
+            if data.get('person'):
+                detections['person'] = True
+                self.bb.set("found", "person")
+            
+            if detections:
+                self.bb.set("detections", detections)
+                
+        except json.JSONDecodeError as e:
+            self.get_logger().warn(f"Failed to parse detections: {e}")
     
     def _tick(self):
         """
