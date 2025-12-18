@@ -19,8 +19,10 @@ ARGUMENTS = [
                           description='Ignition World'),
 ]
 
+SPAWN_DEFAULTS = {'x': '0.0', 'y': '0.0', 'z': '0.0', 'yaw': '-1.57'}
+
 for pose_element in ['x', 'y', 'z', 'yaw']:
-    ARGUMENTS.append(DeclareLaunchArgument(pose_element, default_value='0.0',
+    ARGUMENTS.append(DeclareLaunchArgument(pose_element, default_value=SPAWN_DEFAULTS[pose_element],
                      description=f'{pose_element} component of the robot pose.'))
 
 

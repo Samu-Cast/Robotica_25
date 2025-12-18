@@ -15,8 +15,7 @@ WORKDIR /home/ubuntu/sense_ws
 RUN apt-get update && apt-get install -y \
     python3-pip \
     libglib2.0-0 \
-    libgl1-mesa-glx \
-    libglib2.0-dev \
+    libgl1 \
     ros-jazzy-cv-bridge \
     ros-jazzy-vision-opencv \
     sudo \
