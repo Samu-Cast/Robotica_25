@@ -45,6 +45,12 @@ def generate_launch_description():
         'ir_intensity_right',
         'ir_intensity_side_left',
     ]
+    
+    ultrasonic_sensors = [
+        'ultrasonic_front',
+        'ultrasonic_front_left',
+        'ultrasonic_front_right',
+    ]
 
     # cmd_vel bridge
     cmd_vel_bridge = Node(
@@ -170,6 +176,30 @@ def generate_launch_description():
                   '_internal/' + ir + '/scan')
              ]) for ir in ir_intensity_sensors
     ])
+    
+    # Ultrasonic bridges
+    # Lista dei suffissi dei nomi (come definiti nelle chiamate alla macro nell'URDF)
+    # Esempio: se nell'URDF hai name="front", qui metti 'front'
+    ultrasonic_suffixes = [
+        'front',
+        'front_left',
+        'front_right',
+    ]
+
+    ultrasonic_bridges = GroupAction([
+        Node(package='ros_gz_bridge', executable='parameter_bridge',
+             name='bridge_ultrasonic_' + suffix,
+             output='screen',
+             parameters=[{
+                 'use_sim_time': use_sim_time,
+                 'lazy': True
+             }],
+             arguments=[
+                 # Topic Gazebo diretto (pubblicato dal sensore gpu_lidar)
+                 '/ultrasonic_' + suffix + '/scan' +
+                 '@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan'
+             ]) for suffix in ultrasonic_suffixes
+    ])
 
     # Buttons message bridge
     buttons_msg_bridge = Node(
@@ -203,6 +233,8 @@ def generate_launch_description():
             '/camera_front/camera_info@sensor_msgs/msg/CameraInfo@gz.msgs.CameraInfo'
         ]
     )
+    
+    
 
     # Create launch description and add actions
     ld = LaunchDescription(ARGUMENTS)
@@ -212,6 +244,7 @@ def generate_launch_description():
     ld.add_action(bumper_contact_bridge)
     ld.add_action(cliff_bridges)
     ld.add_action(ir_bridges)
+    ld.add_action(ultrasonic_bridges)
     ld.add_action(buttons_msg_bridge)
     ld.add_action(camera_bridge)
     return ld

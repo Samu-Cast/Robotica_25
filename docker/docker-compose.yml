@@ -3,7 +3,8 @@ services:
   # ROS2 Jazzy Simulation Container (container host)
   ros2-sim:
     platform: linux/amd64
-    build: .
+    build: 
+      context: ../ros2_create3_sim
     container_name: ros2_jazzy_sim_git
     networks:
       - ros_net
@@ -15,8 +16,8 @@ services:
       - QT_X11_NO_MITSHM=1
       - ROS_DOMAIN_ID=42
     volumes:
-      # - ../ros2/src:/home/ubuntu/ros2_ws/src/
       - ../ros2_create3_sim/:/home/ubuntu/ros2_ws/
+      - ../models/gazebo/:/home/ubuntu/ros2_ws/models
     security_opt:
       - seccomp=unconfined
     stdin_open: true
