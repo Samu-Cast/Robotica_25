@@ -734,6 +734,132 @@
         </model>
 
 
+        <!-- ============================================ -->
+        <!-- HUMANS - Using human model for YOLO detection -->
+        <!-- ============================================ -->
+        
+        <!-- Human 1: Near center corridor -->
+        <include>
+            <uri>model://human</uri>
+            <name>human_1</name>
+            <pose>2 3 0 0 0 1.57</pose>
+            <static>true</static>
+        </include>
+        
+        <!-- Human 2: In upper area -->
+        <include>
+            <uri>model://human</uri>
+            <name>human_2</name>
+            <pose>-5 6 0 0 0 0</pose>
+            <static>true</static>
+        </include>
+        
+        <!-- Human 3: Near bottom right -->
+        <include>
+            <uri>model://human</uri>
+            <name>human_3</name>
+            <pose>6 -4 0 0 0 -0.785</pose>
+            <static>true</static>
+        </include>
+
+        <!-- ============================================ -->
+        <!-- OBSTACLES - Simple boxes for navigation -->
+        <!-- ============================================ -->
+        
+        <!-- Obstacle 1: Box in corridor -->
+        <model name='obstacle_1'>
+            <static>true</static>
+            <pose>0 0 0.25 0 0 0</pose>
+            <link name='link'>
+                <collision name='collision'>
+                    <geometry>
+                        <box><size>0.5 0.5 0.5</size></box>
+                    </geometry>
+                </collision>
+                <visual name='visual'>
+                    <geometry>
+                        <box><size>0.5 0.5 0.5</size></box>
+                    </geometry>
+                    <material>
+                        <ambient>0.4 0.4 0.4 1</ambient>
+                        <diffuse>0.5 0.5 0.5 1</diffuse>
+                    </material>
+                </visual>
+            </link>
+        </model>
+        
+        <!-- Obstacle 2: Small box near wall -->
+        <model name='obstacle_2'>
+            <static>true</static>
+            <pose>-3 -2 0.2 0 0 0.3</pose>
+            <link name='link'>
+                <collision name='collision'>
+                    <geometry>
+                        <box><size>0.4 0.4 0.4</size></box>
+                    </geometry>
+                </collision>
+                <visual name='visual'>
+                    <geometry>
+                        <box><size>0.4 0.4 0.4</size></box>
+                    </geometry>
+                    <material>
+                        <ambient>0.5 0.35 0.2 1</ambient>
+                        <diffuse>0.6 0.4 0.25 1</diffuse>
+                    </material>
+                </visual>
+            </link>
+        </model>
+        
+        <!-- Obstacle 3: Tall cylinder (pipe/column) -->
+        <model name='obstacle_3'>
+            <static>true</static>
+            <pose>5 5 0.4 0 0 0</pose>
+            <link name='link'>
+                <collision name='collision'>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.15</radius>
+                            <length>0.8</length>
+                        </cylinder>
+                    </geometry>
+                </collision>
+                <visual name='visual'>
+                    <geometry>
+                        <cylinder>
+                            <radius>0.15</radius>
+                            <length>0.8</length>
+                        </cylinder>
+                    </geometry>
+                    <material>
+                        <ambient>0.5 0.5 0.55 1</ambient>
+                        <diffuse>0.6 0.6 0.65 1</diffuse>
+                    </material>
+                </visual>
+            </link>
+        </model>
+        
+        <!-- Obstacle 4: Wide low box (equipment) -->
+        <model name='obstacle_4'>
+            <static>true</static>
+            <pose>-7 2 0.15 0 0 0</pose>
+            <link name='link'>
+                <collision name='collision'>
+                    <geometry>
+                        <box><size>0.8 0.5 0.3</size></box>
+                    </geometry>
+                </collision>
+                <visual name='visual'>
+                    <geometry>
+                        <box><size>0.8 0.5 0.3</size></box>
+                    </geometry>
+                    <material>
+                        <ambient>0.3 0.3 0.35 1</ambient>
+                        <diffuse>0.4 0.4 0.45 1</diffuse>
+                    </material>
+                </visual>
+            </link>
+        </model>
+
 
         <!-- Spawn Turtlebot4 -->
         <!-- <include>
