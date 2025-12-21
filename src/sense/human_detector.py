@@ -73,6 +73,7 @@ class HumanDetector:
                 frame, 
                 conf=self.conf_threshold, 
                 classes=[self.PERSON_CLASS_ID],  # Only detect persons
+                imgsz=320,  # Reduced resolution for faster inference
                 verbose=False
             )
             
