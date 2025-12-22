@@ -1,20 +1,19 @@
 """
-    Charlie Robot - Plan Module
-    Behavior Tree-based decision making for ROS2
-    
-    This module implements the strategic decision layer for the Charlie Robot.
-    It receives sensor data from Sense module, makes decisions using a Behavior Tree,
-    and sends commands to the Act module for physical execution.
+Charlie Robot - Plan Module
+Behavior Tree-based decision making for ROS2
 
-    Subscribes to:
-        /sense/world_state   - JSON: {distance_left, distance_center, distance_right,
-                                      detected_color, robot_position, detections, battery}
+This module implements the strategic decision layer for the Charlie Robot.
+It receives sensor data from Sense module, makes decisions using a Behavior Tree,
+and sends commands to the Act module for physical execution.
 
-    Publishes to:
-        /plan/action         - String: action command (MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, 
-                                       AVOID_OBSTACLE, STOP, ACTIVATE_VALVE)
-        /plan/goal_pose      - String: JSON goal {x, y, theta}
-        /plan/signals        - String: JSON array of signals ["PersonFound", "ValveActivated"]
+Subscribes to:
+    /sense/proximity/front, front_left, front_right (Range) - ultrasonic distances
+    /sense/odometry (Pose2D) - robot position {x, y, theta}
+    /sense/detection (String JSON) - current detection event
+
+Publishes to:
+    /plan/command - String command for Act (Front, Left, Right, Stop)
+    /plan/signals - JSON array of event signals ["PersonFound", "ValveActivated"]
 """
 
 import json
@@ -25,6 +24,8 @@ try:
     import rclpy
     from rclpy.node import Node
     from std_msgs.msg import String
+    from sensor_msgs.msg import Range
+    from geometry_msgs.msg import Pose2D
     ROS2_AVAILABLE = True
 except ImportError:
     ROS2_AVAILABLE = False
@@ -749,52 +750,55 @@ class PlanNode(Node):
         for key in blackboard_keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
         
-        # Initialize blackboard with default values
         self._init_blackboard()
         self.tree.setup_with_descendants()
         
-        # ROS2 Subscriptions - Multiple topics for different data
-        # /sense/world_state - general data (obstacles, battery)
-        self.create_subscription(String, '/sense/world_state', self._world_cb, 10)
-        # /sense/robot_position - odometry position {x, y, theta}
-        self.create_subscription(String, '/sense/robot_position', self._position_cb, 10)
-        # /sense/distances - 3 distance sensors {left, center, right}
-        self.create_subscription(String, '/sense/distances', self._distances_cb, 10)
-        # /sense/detections - YOLO detections {detected_color, yolo_valve, person, obstacle}
-        self.create_subscription(String, '/sense/detections', self._detections_cb, 10)
+        #Subscriptions to Sense topics
+        self.create_subscription(
+            Range, '/sense/proximity/front',
+            lambda msg: self._proximity_cb(msg, 'center'), 10
+        )
+        self.create_subscription(
+            Range, '/sense/proximity/front_left',
+            lambda msg: self._proximity_cb(msg, 'left'), 10
+        )
+        self.create_subscription(
+            Range, '/sense/proximity/front_right',
+            lambda msg: self._proximity_cb(msg, 'right'), 10
+        )
+        self.create_subscription(Pose2D, '/sense/odometry', self._odom_cb, 10)
+        self.create_subscription(String, '/sense/detection', self._detection_cb, 10)
         
-        ##TODO: Update with actual formats from Giam and Sal implementation
-        # ROS2 Publishers
-        self.action_pub = self.create_publisher(String, '/plan/action', 10)
-        self.goal_pub = self.create_publisher(String, '/plan/goal_pose', 10)
+        #Publishers to Act module
+        self.cmd_pub = self.create_publisher(String, '/plan/command', 10)
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
         
-        # Timer for BT tick (10 Hz)
+        #Timer for BT tick (10 Hz)
         self.create_timer(0.1, self._tick)
         
         self.get_logger().info('Plan Node ready')
     
     def _init_blackboard(self):
         """Initialize blackboard with default values."""
-        # Base data
-        self.bb.set("battery", 100.0)
+        #Base data
+        self.bb.set("battery", 100.0)  #TODO: Sense doesn't publish battery
         self.bb.set("obstacles", [])
         self.bb.set("detections", {})
         
-        # Target navigation
+        #Target navigation
         self.bb.set("current_target", None)
         self.bb.set("visited_targets", [])
         
-        # Object detection & signals
+        #Object detection & signals
         self.bb.set("found", None)
         self.bb.set("signals", [])
         
-        # Commands to Act module
+        #Commands to Act module
         self.bb.set("plan_action", "IDLE")
         self.bb.set("goal_pose", None)
         self.bb.set("mission_complete", False)
         
-        # Sensor data from Sense module
+        #Sensor data from Sense module
         self.bb.set("detected_color", None)
         self.bb.set("reset_odom", None)
         self.bb.set("distance_left", 999.0)
@@ -802,86 +806,81 @@ class PlanNode(Node):
         self.bb.set("distance_right", 999.0)
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
     
-    def _world_cb(self, msg):
+    def _proximity_cb(self, msg, sensor):
         """
-        Callback for /sense/world_state topic.
-        Parses JSON data from Sense module and updates blackboard.
-        """
-        try:
-            data = json.loads(msg.data)
-            
-            # Base data
-            self.bb.set("obstacles", data.get("obstacles", []))
-            
-            # Detections (person, valve, fire, obstacle)
-            self.bb.set("detections", data.get("detections", {}))
-            
-            # Battery level
-            self.bb.set("battery", data.get("battery", 100.0))
-                
-        except json.JSONDecodeError as e:
-            self.get_logger().warn(f"Failed to parse world_state: {e}")
-        except Exception as e:
-            self.get_logger().error(f"Error in _world_cb: {e}")
-    
-    def _position_cb(self, msg):
-        """
-        Callback for /sense/robot_position topic.
-        Receives robot odometry position: {x, y, theta}
-        """
-        try:
-            data = json.loads(msg.data)
-            self.bb.set("robot_position", data)
-        except json.JSONDecodeError as e:
-            self.get_logger().warn(f"Failed to parse robot_position: {e}")
-    
-    def _distances_cb(self, msg):
-        """
-        Callback for /sense/distances topic.
-        Receives 3 distance sensor readings: {left, center, right}
-        """
-        try:
-            data = json.loads(msg.data)
-            if 'left' in data:
-                self.bb.set("distance_left", data['left'])
-            if 'center' in data:
-                self.bb.set("distance_center", data['center'])
-            if 'right' in data:
-                self.bb.set("distance_right", data['right'])
-        except json.JSONDecodeError as e:
-            self.get_logger().warn(f"Failed to parse distances: {e}")
-    
-    def _detections_cb(self, msg):
-        """
-        Callback for /sense/detections topic.
-        Receives YOLO detections: {detected_color, person}
+        Callback for proximity sensors (Range messages).
         
-        Detection logic:
-        - detected_color: "red" = valve (mission objective), others = normal targets
-        - person: True if YOLO detects a person
-        - obstacle: inferred from distance sensors (no explicit detection needed)
+        Args:
+            msg: Range message from Sense
+            sensor: 'left', 'center', or 'right'
+        """
+        distance = msg.range if msg.range >= 0 else 999.0
+        
+        if sensor == 'center':
+            self.bb.set("distance_center", distance)
+        elif sensor == 'left':
+            self.bb.set("distance_left", distance)
+        elif sensor == 'right':
+            self.bb.set("distance_right", distance)
+    
+    def _odom_cb(self, msg):
+        """
+        Callback for odometry (Pose2D message).
+        
+        Args:
+            msg: Pose2D message with x, y, theta
+        """
+        self.bb.set("robot_position", {
+            'x': msg.x,
+            'y': msg.y,
+            'theta': msg.theta
+        })
+    
+    def _detection_cb(self, msg):
+        """
+        Callback for detection events (String JSON).
+        
+        Expected format:
+        {
+            "type": "person" | "target" | "obstacle" | "none",
+            "color": "red" | "green" | "blue" | null,
+            "bbox_area": int,
+            "zone": "left" | "center" | "right" | null,
+            "estimated_distance": float,
+            "proximity_distance": float,
+            "confidence": float
+        }
         """
         try:
-            data = json.loads(msg.data)
+            det = json.loads(msg.data)
             
-            # Color detected by camera (red = valve)
-            if 'detected_color' in data:
-                self.bb.set("detected_color", data['detected_color'])
-                # If red, we found the valve!
-                if data['detected_color'] == "red":
-                    self.bb.set("found", "valve")
+            #Set detected_color from detection
+            self.bb.set("detected_color", det.get('color'))
             
-            # Person detection from YOLO
+            #Build detections dict for compatibility
             detections = {}
-            if data.get('person'):
+            if det['type'] == 'person':
                 detections['person'] = True
-                self.bb.set("found", "person")
+            elif det['type'] == 'obstacle':
+                detections['obstacle'] = True
             
-            if detections:
-                self.bb.set("detections", detections)
+            self.bb.set("detections", detections)
+            
+            #Set found based on detection type and color
+            if det['type'] == 'person':
+                self.bb.set("found", "person")
+            elif det.get('color') == 'red':
+                #Red color = valve
+                self.bb.set("found", "valve")
+            elif det['type'] == 'obstacle':
+                self.bb.set("found", "obstacle")
+            else:
+                self.bb.set("found", None)
                 
         except json.JSONDecodeError as e:
-            self.get_logger().warn(f"Failed to parse detections: {e}")
+            self.get_logger().warn(f"Failed to parse detection: {e}")
+        except Exception as e:
+            self.get_logger().error(f"Error in _detection_cb: {e}")
     
     def _tick(self):
         """
