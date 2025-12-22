@@ -23,10 +23,10 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import LaserScan, Image, Range
+from sensor_msgs.msg import LaserScan, Image, Range, BatteryState
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose2D
-from std_msgs.msg import String
+from std_msgs.msg import String, Float32
 from cv_bridge import CvBridge
 
 # Import detection modules
@@ -79,6 +79,7 @@ class SenseNode(Node):
             'front_right': float('inf'),
         }
         self.odometry = {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        self.battery_level = None  # None until first message received
         self.color_detections = {'targets': []}
         self.human_detections = {'person_detected': False, 'persons': []}
         
@@ -109,6 +110,7 @@ class SenseNode(Node):
         )
         self.create_subscription(Image, '/camera_front/image', self._camera_callback, 10)
         self.create_subscription(Odometry, '/odom', self._odom_callback, 10)
+        self.create_subscription(BatteryState, '/battery_state', self._battery_callback, 10)
         
         # === PUBLISHERS ===
         # Proximity sensors (Range messages)
@@ -127,12 +129,16 @@ class SenseNode(Node):
         # Debug image
         self.debug_image_pub = self.create_publisher(Image, '/sense/debug_image', 10)
         
+        # Battery (Float32 percentage)
+        self.battery_pub = self.create_publisher(Float32, '/sense/battery', 10)
+        
         # Timer to publish proximity and odometry at fixed rate
         self.create_timer(0.1, self._publish_periodic)  # 10 Hz
         
         self.get_logger().info('Sense Node ready')
         self.get_logger().info('  - /sense/proximity/[front|front_left|front_right]')
         self.get_logger().info('  - /sense/odometry')
+        self.get_logger().info('  - /sense/battery')
         self.get_logger().info('  - /sense/detection (event-driven)')
     
     def _ultrasonic_callback(self, msg: LaserScan, sensor_name: str):
@@ -154,6 +160,11 @@ class SenseNode(Node):
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
         self.odometry['theta'] = np.arctan2(siny_cosp, cosy_cosp)
+    
+    def _battery_callback(self, msg: BatteryState):
+        """Process battery state"""
+        # BatteryState.percentage is 0.0-1.0, convert to 0-100
+        self.battery_level = msg.percentage * 100.0
     
     def _camera_callback(self, msg: Image):
         """Process camera image for color and human detection"""
@@ -386,6 +397,12 @@ class SenseNode(Node):
         odom_msg.y = self.odometry['y']
         odom_msg.theta = self.odometry['theta']
         self.odometry_pub.publish(odom_msg)
+        
+        # Publish battery (only if we have received data)
+        if self.battery_level is not None:
+            battery_msg = Float32()
+            battery_msg.data = self.battery_level
+            self.battery_pub.publish(battery_msg)
     
     def _draw_debug(self, frame):
         """Draw debug information on frame"""
