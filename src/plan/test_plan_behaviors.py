@@ -42,7 +42,7 @@ class TestPlanBehaviors:
             'current_target', 'visited_targets', 'found', 'signals', 
             'plan_action', 'goal_pose', 'mission_complete', 'detected_color',
             'reset_odom', 'distance_left', 'distance_center', 'distance_right',
-            'robot_position', 'yolo_valve'
+            'robot_position'
         ]
         for key in keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
@@ -54,7 +54,6 @@ class TestPlanBehaviors:
         self.bb.set("detected_color", None)
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
         self.bb.set("visited_targets", [])
-        self.bb.set("yolo_valve", False)
         self.bb.set("reset_odom", None)
     
     def teardown_method(self):
@@ -210,18 +209,17 @@ class TestPlanBehaviors:
         print("✓ Ritorna FAILURE quando tutti i target sono visitati")
     
     def test_at_target_correct_color(self):
-        """Test AtTarget - wall alignment and valve check"""
+        """Test AtTarget - wall alignment and valve check (red = valve)"""
         print("\n[TEST] AtTarget - Aligned and red = valve")
         
-        # Setup - robot near wall, aligned (left == right), red color
+        # Setup - robot near wall, aligned (left == right), red color = valve
         target = {'name': 'red', 'x': 10.0, 'y': 15.0, 'theta': 0.0}
         self.bb.set("current_target", target)
-        self.bb.set("detected_color", "red")
-        self.bb.set("distance_center", 0.5)  # Near wall
-        self.bb.set("distance_left", 0.6)    # Aligned
-        self.bb.set("distance_right", 0.6)   # Aligned
+        self.bb.set("detected_color", "red")  # Red color = valve!
+        self.bb.set("distance_center", 0.5)   # Near wall
+        self.bb.set("distance_left", 0.6)     # Aligned
+        self.bb.set("distance_right", 0.6)    # Aligned
         self.bb.set("visited_targets", [])
-        self.bb.set("yolo_valve", True)       # YOLO confirms valve
         behavior = AtTarget()
         behavior.setup_with_descendants()
         

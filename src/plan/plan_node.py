@@ -7,12 +7,10 @@
     and sends commands to the Act module for physical execution.
 
     Subscribes to:
-        /sense/world_state   - JSON: {distance_left, distance_center, distance_right,
-                                      detected_color, robot_position, detections, battery}
+        /sense/world_state   - JSON: {distance_left, distance_center, distance_right, detected_color, robot_position, detections, battery}
 
     Publishes to:
-        /plan/action         - String: action command (MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, 
-                                       AVOID_OBSTACLE, STOP, ACTIVATE_VALVE)
+        /plan/action         - String: action command (MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, AVOID_OBSTACLE, STOP, ACTIVATE_VALVE)
         /plan/goal_pose      - String: JSON goal {x, y, theta}
         /plan/signals        - String: JSON array of signals ["PersonFound", "ValveActivated"]
 """
@@ -30,7 +28,7 @@ except ImportError:
     ROS2_AVAILABLE = False
     Node = object
 
-# Behavior Tree imports
+#Behavior Tree imports
 import py_trees
 from py_trees import decorators
 from py_trees.composites import Sequence, Selector, Parallel
@@ -38,16 +36,16 @@ from py_trees.common import Status, ParallelPolicy
 
 
 ##########################################################################
-# KNOWN TARGETS CONFIGURATION
-# Define the map locations and their coordinates
-# Robot does NOT know which target is the valve - must check each one
-# theta = robot orientation at arrival (radians, 0 = facing right, π/2 = facing up)
+#KNOWN TARGETS CONFIGURATION
+#Define the map locations and their coordinates
+#Robot does NOT know which target is the valve - must check each one
+#theta = robot orientation at arrival (radians, 0 = facing right, π/2 = facing up)
 ##########################################################################
 KNOWN_TARGETS = {
-    # Color-based targets - robot will visit these and check for valve
+    #Color-based targets - robot will visit these and check for valve
     'green': {'x': 2.0, 'y': 3.0, 'theta': 0.0},
     'blue': {'x': 5.0, 'y': 9.0, 'theta': 1.57},
-    'red': {'x': 10.0, 'y': 15.0, 'theta': 0.0},  # This is actually the valve, but robot doesn't know
+    'red': {'x': 10.0, 'y': 15.0, 'theta': 0.0}, #This is actually the valve, but robot doesn't know
 }
 ##########################################################################
 
@@ -68,17 +66,17 @@ def calculate_best_direction(distance_left, distance_center, distance_right, thr
     Returns:
         str: One of 'MOVE_FORWARD', 'TURN_LEFT', 'TURN_RIGHT', or 'AVOID_OBSTACLE'
     """
-    # If center is clear, move forward
+    #If center is clear, move forward
     if distance_center > threshold:
         return 'MOVE_FORWARD'
     
-    # Center blocked - choose direction with more space
+    #Center blocked - choose direction with more space
     if distance_left > threshold and distance_left >= distance_right:
         return 'TURN_LEFT'
     elif distance_right > threshold:
         return 'TURN_RIGHT'
     else:
-        # All sensors blocked - generic obstacle avoidance
+        #All sensors blocked - generic obstacle avoidance
         return 'AVOID_OBSTACLE'
 
 
@@ -101,21 +99,21 @@ def calculate_closest_target(robot_pos, visited_targets):
     closest = None
     min_distance = float('inf')
     
-    # Only consider unique positions (avoid duplicates like 'green' and '1')
+    #Only consider unique positions
     seen_positions = set()
     
     for target_name, target_data in KNOWN_TARGETS.items():
-        # Skip visited targets
+        #Skip visited targets
         if target_name in visited_targets:
             continue
         
-        # Skip duplicate positions
+        #Skip duplicate positions 
         pos_key = (target_data['x'], target_data['y'])
         if pos_key in seen_positions:
             continue
         seen_positions.add(pos_key)
         
-        # Calculate Euclidean distance
+        #Calculate Euclidean distance
         dx = target_data['x'] - robot_x
         dy = target_data['y'] - robot_y
         distance = math.sqrt(dx**2 + dy**2)
@@ -150,20 +148,20 @@ def calculate_direction_to_target(robot_pos, target):
     robot_y = robot_pos.get('y', 0.0)
     robot_theta = robot_pos.get('theta', 0.0)
     
-    # Calculate angle to target
+    #Calculate angle to target
     dx = target['x'] - robot_x
     dy = target['y'] - robot_y
     target_angle = math.atan2(dy, dx)
     
-    # Calculate angle difference (normalize to -π to π)
+    #Calculate angle difference (normalize to -π to π)
     angle_diff = target_angle - robot_theta
     while angle_diff > math.pi:
         angle_diff -= 2 * math.pi
     while angle_diff < -math.pi:
         angle_diff += 2 * math.pi
     
-    # Decide action based on angle difference
-    angle_threshold = 0.15  # ~8.5 degrees tolerance
+    #Decide action based on angle difference
+    angle_threshold = 0.15  #~8.5 degrees tolerance
     
     if abs(angle_diff) < angle_threshold:
         return 'MOVE_FORWARD'
@@ -195,9 +193,9 @@ def check_wall_alignment(distance_left, distance_right, threshold=0.05):
     return diff <= threshold
 
 
-# ============================================================================
-# BEHAVIOR TREE NODES - Battery Management
-# ============================================================================
+
+#BEHAVIOR TREE NODES
+#Battery Management
 
 class BatteryCheck(py_trees.behaviour.Behaviour):
     """
@@ -212,7 +210,6 @@ class BatteryCheck(py_trees.behaviour.Behaviour):
     def update(self):
         battery = self.bb.get("battery")
         return Status.SUCCESS if battery > 20 else Status.FAILURE
-
 
 class GoCharge(py_trees.behaviour.Behaviour):
     """
@@ -259,14 +256,10 @@ class GoCharge(py_trees.behaviour.Behaviour):
         new_battery = min(100, battery + charge_amount)
         self.bb.set("battery", new_battery)
         
-        # SUCCESS when fully charged (>= 80%), otherwise RUNNING
+        #SUCCESS when fully charged (>= 80%), otherwise RUNNING
         return Status.SUCCESS if new_battery >= 80 else Status.RUNNING
 
-
-# ============================================================================
-# BEHAVIOR TREE NODES - Target Navigation
-# ============================================================================
-
+#Target Navigation
 class CalculateTarget(py_trees.behaviour.Behaviour):
     """
     Select the next unvisited target from KNOWN_TARGETS.
@@ -296,7 +289,6 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
 
         # All targets already visited
         return Status.FAILURE
-
 
 class AtTarget(py_trees.behaviour.Behaviour):
     """
@@ -376,7 +368,6 @@ class AtTarget(py_trees.behaviour.Behaviour):
         # Not the valve - continue to next target
         return Status.SUCCESS
 
-
 class MoveToTarget(py_trees.behaviour.Behaviour):
     """
     Navigate towards closest target using odometry-based direction.
@@ -446,11 +437,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         self.bb.set("plan_action", action)
         return Status.RUNNING
 
-
-# ============================================================================
-# BEHAVIOR TREE NODES - Object Detection & Recognition
-# ============================================================================
-
+#Object Detection & Recognition
 class SearchObj(py_trees.behaviour.Behaviour):
     """
     Search for objects using camera detections and color detection.
@@ -488,7 +475,6 @@ class SearchObj(py_trees.behaviour.Behaviour):
         
         return Status.SUCCESS
 
-
 class RecognitionPerson(py_trees.behaviour.Behaviour):
     """Check if 'found' equals 'person'. Returns SUCCESS if person found."""
     def __init__(self):
@@ -498,7 +484,6 @@ class RecognitionPerson(py_trees.behaviour.Behaviour):
     
     def update(self):
         return Status.SUCCESS if self.bb.get("found") == "person" else Status.FAILURE
-
 
 class RecognitionObstacle(py_trees.behaviour.Behaviour):
     """Check if 'found' equals 'obstacle'. Returns SUCCESS if obstacle found."""
@@ -510,7 +495,6 @@ class RecognitionObstacle(py_trees.behaviour.Behaviour):
     def update(self):
         return Status.SUCCESS if self.bb.get("found") == "obstacle" else Status.FAILURE
 
-
 class RecognitionValve(py_trees.behaviour.Behaviour):
     """Check if 'found' equals 'valve'. Returns SUCCESS if valve found."""
     def __init__(self):
@@ -521,11 +505,7 @@ class RecognitionValve(py_trees.behaviour.Behaviour):
     def update(self):
         return Status.SUCCESS if self.bb.get("found") == "valve" else Status.FAILURE
 
-
-# ============================================================================
-# BEHAVIOR TREE NODES - Actions & Signals
-# ============================================================================
-
+#Actions & Signals
 class SignalPerson(py_trees.behaviour.Behaviour):
     """Add 'PersonFound' signal to signals list."""
     def __init__(self):
@@ -539,7 +519,6 @@ class SignalPerson(py_trees.behaviour.Behaviour):
         self.bb.set("signals", signals)
         return Status.SUCCESS
 
-
 class GoAroundP(py_trees.behaviour.Behaviour):
     """Set action to avoid person obstacle."""
     def __init__(self):
@@ -551,7 +530,6 @@ class GoAroundP(py_trees.behaviour.Behaviour):
         self.bb.set("plan_action", "AVOID_OBSTACLE")
         return Status.SUCCESS
 
-
 class GoAroundO(py_trees.behaviour.Behaviour):
     """Set action to avoid generic obstacle."""
     def __init__(self):
@@ -562,7 +540,6 @@ class GoAroundO(py_trees.behaviour.Behaviour):
     def update(self):
         self.bb.set("plan_action", "AVOID_OBSTACLE")
         return Status.SUCCESS
-
 
 class ActiveValve(py_trees.behaviour.Behaviour):
     """
@@ -586,7 +563,6 @@ class ActiveValve(py_trees.behaviour.Behaviour):
         self.bb.set("plan_action", "ACTIVATE_VALVE")
         self.bb.set("mission_complete", True)
         return Status.SUCCESS
-
 
 class GoHome(py_trees.behaviour.Behaviour):
     """
@@ -627,11 +603,7 @@ class GoHome(py_trees.behaviour.Behaviour):
         self.bb.set("plan_action", "MOVE_TO_GOAL")
         return Status.RUNNING
 
-
-# ============================================================================
-# BEHAVIOR TREE CONSTRUCTION
-# ============================================================================
-
+#BEHAVIOR TREE CONSTRUCTION
 def build_tree():
     """
     Build the complete Behavior Tree for Charlie Robot.
@@ -650,57 +622,56 @@ def build_tree():
         - ActiveValve
         - GoHome
     """
-    
-    # Battery management: check battery, go charge if low
+    #Battery management: check battery, go charge if low
     battery = Selector("Battery", memory=False, children=[
         BatteryCheck(),
         GoCharge()
     ])
     
-    # Person handling: recognize, signal, and avoid
+    #Person handling: recognize, signal, and avoid
     person_seq = Sequence("PersonHandler", memory=False, children=[
         RecognitionPerson(),
         SignalPerson(),
         GoAroundP()
     ])
     
-    # Obstacle handling: recognize and avoid
+    #Obstacle handling: recognize and avoid
     obstacle_seq = Sequence("ObstacleHandler", memory=False, children=[
         RecognitionObstacle(),
         GoAroundO()
     ])
     
-    # Handle found objects (person has priority over obstacle)
+    #Handle found objects (person has priority over obstacle)
     found_handler = Selector("FoundHandler", memory=False, children=[
         person_seq,
         obstacle_seq
     ])
     
-    # Search sequence: search for objects, then handle if found
+    #Search sequence: search for objects, then handle if found
     search = Sequence("Search", memory=False, children=[
         SearchObj(),
         found_handler
     ])
     
-    # Decorator to prevent search failure from blocking parallel
+    #Decorator to prevent search failure from blocking parallel
     search_dec = decorators.FailureIsSuccess(
         name="SearchDecorator",
         child=search
     )
     
-    # Parallel movement with searching
+    #Parallel movement with searching
     move_search = Parallel("MoveAndSearch", 
         policy=ParallelPolicy.SuccessOnAll(),
         children=[MoveToTarget(), search_dec]
     )
     
-    # Go to target: check if at target, otherwise move with search
+    #Go to target: check if at target, otherwise move with search
     goto = Selector("GoToTarget", memory=False, children=[
         AtTarget(),
         move_search
     ])
     
-    # Main mission sequence
+    #Main mission sequence
     main = Sequence("Main", memory=True, children=[
         battery,
         CalculateTarget(),
@@ -710,34 +681,45 @@ def build_tree():
         GoHome()
     ])
     
-    # Retry until mission success
+    #Retry until mission success
     root = decorators.Retry("LoopUntilSuccess", child=main, num_failures=-1)
     
     return root
 
-
-# ============================================================================
-# ROS2 NODE
-# ============================================================================
+#ROS2 NODE
+#Mapping from internal actions to Act module commands
+ACTION_TO_COMMAND = {
+    'MOVE_FORWARD': 'Front',
+    'TURN_LEFT': 'Left',
+    'TURN_RIGHT': 'Right',
+    'STOP': 'Stop',
+    'IDLE': 'Stop',
+    'AVOID_OBSTACLE': 'Left',
+    'ACTIVATE_VALVE': 'Stop',
+    'MOVE_TO_GOAL': 'Front',
+}
 
 class PlanNode(Node):
     """
     Plan ROS2 Node - Strategic decision layer for Charlie Robot.
     
-    Receives sensor data from Sense module via /sense/world_state topic.
-    Processes data through Behavior Tree.
-    Publishes commands to Act module via /plan/action, /plan/goal_pose, /plan/signals.
+    Subscribes to:
+        /sense/world_state - JSON with battery, odometry, obstacles, detections, detected_color
+    
+    Publishes to:
+        /plan/command - String command for Act (Front, Left, Right, Stop)
+        /plan/signals - JSON array of signals (PersonFound, ValveActivated)
     """
     
     def __init__(self):
         super().__init__('plan_node')
         self.get_logger().info('=== Plan Node Starting ===')
         
-        # Build Behavior Tree
+        #Build Behavior Tree
         self.tree = build_tree()
         self.bb = py_trees.blackboard.Client(name="PlanNode")
         
-        # Register all blackboard keys with write access
+        #Register all blackboard keys with write access
         blackboard_keys = [
             'battery', 'obstacles', 'detections', 'targets',
             'current_target', 'visited_targets', 'found', 'signals',
@@ -749,52 +731,42 @@ class PlanNode(Node):
         for key in blackboard_keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
         
-        # Initialize blackboard with default values
         self._init_blackboard()
         self.tree.setup_with_descendants()
         
-        # ROS2 Subscriptions - Multiple topics for different data
-        # /sense/world_state - general data (obstacles, battery)
+        #Single subscription to Sense world state
         self.create_subscription(String, '/sense/world_state', self._world_cb, 10)
-        # /sense/robot_position - odometry position {x, y, theta}
-        self.create_subscription(String, '/sense/robot_position', self._position_cb, 10)
-        # /sense/distances - 3 distance sensors {left, center, right}
-        self.create_subscription(String, '/sense/distances', self._distances_cb, 10)
-        # /sense/detections - YOLO detections {detected_color, yolo_valve, person, obstacle}
-        self.create_subscription(String, '/sense/detections', self._detections_cb, 10)
         
-        ##TODO: Update with actual formats from Giam and Sal implementation
-        # ROS2 Publishers
-        self.action_pub = self.create_publisher(String, '/plan/action', 10)
-        self.goal_pub = self.create_publisher(String, '/plan/goal_pose', 10)
+        #Publishers to Act module
+        self.cmd_pub = self.create_publisher(String, '/plan/command', 10)
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
         
-        # Timer for BT tick (10 Hz)
+        #Timer for BT tick (10 Hz)
         self.create_timer(0.1, self._tick)
         
         self.get_logger().info('Plan Node ready')
     
     def _init_blackboard(self):
         """Initialize blackboard with default values."""
-        # Base data
+        #Base data
         self.bb.set("battery", 100.0)
         self.bb.set("obstacles", [])
         self.bb.set("detections", {})
         
-        # Target navigation
+        #Target navigation
         self.bb.set("current_target", None)
         self.bb.set("visited_targets", [])
         
-        # Object detection & signals
+        #Object detection & signals
         self.bb.set("found", None)
         self.bb.set("signals", [])
         
-        # Commands to Act module
+        #Commands to Act module
         self.bb.set("plan_action", "IDLE")
         self.bb.set("goal_pose", None)
         self.bb.set("mission_complete", False)
         
-        # Sensor data from Sense module
+        #Sensor data from Sense module
         self.bb.set("detected_color", None)
         self.bb.set("reset_odom", None)
         self.bb.set("distance_left", 999.0)
@@ -805,119 +777,75 @@ class PlanNode(Node):
     def _world_cb(self, msg):
         """
         Callback for /sense/world_state topic.
-        Parses JSON data from Sense module and updates blackboard.
+        Parses all sensor data from Sense module.
         """
         try:
             data = json.loads(msg.data)
             
-            # Base data
-            self.bb.set("obstacles", data.get("obstacles", []))
-            
-            # Detections (person, valve, fire, obstacle)
-            self.bb.set("detections", data.get("detections", {}))
-            
-            # Battery level
+            #Battery (always present)
             self.bb.set("battery", data.get("battery", 100.0))
+            
+            #Odometry/Position (always present)
+            robot_state = data.get("robot_state", data.get("odometry", {}))
+            if robot_state:
+                self.bb.set("robot_position", {
+                    'x': robot_state.get('x', 0.0),
+                    'y': robot_state.get('y', 0.0),
+                    'theta': robot_state.get('theta', 0.0)
+                })
+            
+            #Distance sensors from obstacles list
+            for obs in data.get("obstacles", []):
+                sensor = obs.get('sensor', '')
+                distance = obs.get('distance', 999.0)
+                if sensor == 'front':
+                    self.bb.set("distance_center", distance)
+                elif sensor == 'front_left':
+                    self.bb.set("distance_left", distance)
+                elif sensor == 'front_right':
+                    self.bb.set("distance_right", distance)
+            
+            #Detections (person, obstacle)
+            detections = data.get("detections", {})
+            self.bb.set("detections", detections)
+            
+            #Detected color (red = valve)
+            detected_color = data.get("detected_color")
+            self.bb.set("detected_color", detected_color)
+            if detected_color == "red":
+                self.bb.set("found", "valve")
+            elif detections.get("person"):
+                self.bb.set("found", "person")
                 
         except json.JSONDecodeError as e:
             self.get_logger().warn(f"Failed to parse world_state: {e}")
         except Exception as e:
             self.get_logger().error(f"Error in _world_cb: {e}")
     
-    def _position_cb(self, msg):
-        """
-        Callback for /sense/robot_position topic.
-        Receives robot odometry position: {x, y, theta}
-        """
-        try:
-            data = json.loads(msg.data)
-            self.bb.set("robot_position", data)
-        except json.JSONDecodeError as e:
-            self.get_logger().warn(f"Failed to parse robot_position: {e}")
-    
-    def _distances_cb(self, msg):
-        """
-        Callback for /sense/distances topic.
-        Receives 3 distance sensor readings: {left, center, right}
-        """
-        try:
-            data = json.loads(msg.data)
-            if 'left' in data:
-                self.bb.set("distance_left", data['left'])
-            if 'center' in data:
-                self.bb.set("distance_center", data['center'])
-            if 'right' in data:
-                self.bb.set("distance_right", data['right'])
-        except json.JSONDecodeError as e:
-            self.get_logger().warn(f"Failed to parse distances: {e}")
-    
-    def _detections_cb(self, msg):
-        """
-        Callback for /sense/detections topic.
-        Receives YOLO detections: {detected_color, person}
-        
-        Detection logic:
-        - detected_color: "red" = valve (mission objective), others = normal targets
-        - person: True if YOLO detects a person
-        - obstacle: inferred from distance sensors (no explicit detection needed)
-        """
-        try:
-            data = json.loads(msg.data)
-            
-            # Color detected by camera (red = valve)
-            if 'detected_color' in data:
-                self.bb.set("detected_color", data['detected_color'])
-                # If red, we found the valve!
-                if data['detected_color'] == "red":
-                    self.bb.set("found", "valve")
-            
-            # Person detection from YOLO
-            detections = {}
-            if data.get('person'):
-                detections['person'] = True
-                self.bb.set("found", "person")
-            
-            if detections:
-                self.bb.set("detections", detections)
-                
-        except json.JSONDecodeError as e:
-            self.get_logger().warn(f"Failed to parse detections: {e}")
-    
     def _tick(self):
         """
         Timer callback - tick Behavior Tree and publish outputs.
         Called at 10 Hz (every 0.1 seconds).
         """
-        # Tick Behavior Tree once
         self.tree.tick_once()
         
-        # Publish action command to Act module
-        action = self.bb.get("plan_action") or "IDLE"
+        #Convert internal action to Act command
+        action = self.bb.get("plan_action") or "STOP"
+        command = ACTION_TO_COMMAND.get(action, "Stop")
+        
         msg = String()
-        msg.data = action
-        self.action_pub.publish(msg)
+        msg.data = command
+        self.cmd_pub.publish(msg)
         
-        # Publish goal pose if set
-        goal = self.bb.get("goal_pose")
-        if goal:
-            goal_msg = String()
-            goal_msg.data = json.dumps(goal)
-            self.goal_pub.publish(goal_msg)
-        
-        # Publish signals if any, then clear
+        #Publish signals if any
         signals = self.bb.get("signals") or []
         if signals:
             signals_msg = String()
             signals_msg.data = json.dumps(signals)
             self.signals_pub.publish(signals_msg)
-            # Clear signals after publishing
             self.bb.set("signals", [])
 
-
-# ============================================================================
-# MAIN ENTRY POINT
-# ============================================================================
-
+#entry point
 def main(args=None):
     """Main entry point for Plan Node."""
     if not ROS2_AVAILABLE:
