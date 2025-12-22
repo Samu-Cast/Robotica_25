@@ -1,18 +1,17 @@
 """
-    Charlie Robot - Plan Module
-    Behavior Tree-based decision making for ROS2
-    
-    This module implements the strategic decision layer for the Charlie Robot.
-    It receives sensor data from Sense module, makes decisions using a Behavior Tree,
-    and sends commands to the Act module for physical execution.
+Charlie Robot - Plan Module
+Behavior Tree-based decision making for ROS2
 
-    Subscribes to:
-        /sense/world_state   - JSON: {distance_left, distance_center, distance_right, detected_color, robot_position, detections, battery}
+This module implements the strategic decision layer for the Charlie Robot.
+It receives sensor data from Sense module, makes decisions using a Behavior Tree,
+and sends commands to the Act module for physical execution.
 
-    Publishes to:
-        /plan/action         - String: action command (MOVE_FORWARD, TURN_LEFT, TURN_RIGHT, AVOID_OBSTACLE, STOP, ACTIVATE_VALVE)
-        /plan/goal_pose      - String: JSON goal {x, y, theta}
-        /plan/signals        - String: JSON array of signals ["PersonFound", "ValveActivated"]
+Subscribes to:
+    /sense/world_state - JSON with battery, odometry, obstacles, detections, detected_color
+
+Publishes to:
+    /plan/command - String command for Act (Front, Left, Right, FrontLeft, FrontRight, Stop)
+    /plan/signals - JSON array of event signals ["PersonFound", "ValveActivated"]
 """
 
 import json
