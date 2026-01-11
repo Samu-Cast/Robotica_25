@@ -376,9 +376,10 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
     Navigate towards closest target.
     
     Logic:
-    - Go straight by default
-    - Only use ultrasonic sensors for emergency obstacle avoidance (very close)
-    - Camera-based detection (person/obstacle) handled by other behaviors
+    - Always calculate direction to target (TURN_LEFT/TURN_RIGHT/MOVE_FORWARD)
+    - If ultrasonic detects very close obstacle → override with emergency avoidance
+    - Otherwise → navigate toward target continuously
+    - Camera-based person/obstacle avoidance handled by SearchObj behaviors
     """
     def __init__(self):
         super().__init__(name="MoveToTarget")
@@ -425,17 +426,29 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         }
         self.bb.set("goal_pose", goal_pose)
         
-        # Emergency obstacle avoidance - only when very close (ultrasonics)
-        emergency_threshold = 0.35  # meters - very close!
-        if distance_center < emergency_threshold:
-            # Obstacle directly ahead - turn to more open side
+        # ALWAYS calculate direction to target
+        target_action = calculate_direction_to_target(robot_pos, closest)
+        
+        # Emergency obstacle avoidance - only when VERY close (ultrasonics)
+        emergency_threshold = 0.4  # meters - very close!
+        
+        # Check if all three sensors are blocked
+        all_blocked = (distance_left < emergency_threshold and 
+                      distance_center < emergency_threshold and 
+                      distance_right < emergency_threshold)
+        
+        if all_blocked:
+            # All sensors blocked → 90 degree turn (pick one direction consistently)
+            action = 'TURN_RIGHT'  # Always turn right when trapped
+        elif distance_center < emergency_threshold:
+            # Only center blocked - turn to more open side
             if distance_left > distance_right:
                 action = 'TURN_LEFT'
             else:
                 action = 'TURN_RIGHT'
         else:
-            # Default: go straight! Camera-based avoidance handled by SearchObj
-            action = 'MOVE_FORWARD'
+            # No close obstacle → use calculated direction to target
+            action = target_action
         
         self.bb.set("plan_action", action)
         return Status.RUNNING
