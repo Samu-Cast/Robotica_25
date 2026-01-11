@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, TwistStamped
 from std_msgs.msg import String
 from enum import Enum
 
@@ -24,8 +24,8 @@ class ActNode(Node):
     def __init__(self):
         super().__init__('act_node')
 
-        # Publisher verso il robot per comandare
-        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        # Publisher verso il robot per comandare (TwistStamped per Create3 Gazebo)
+        self.cmd_pub = self.create_publisher(TwistStamped, '/cmd_vel', 10)
 
         # Subscriber dal PLAN che miinvia Sam
         self.plan_sub = self.create_subscription(
@@ -50,13 +50,15 @@ class ActNode(Node):
         # Timer di controllo (10 Hz) 
         self.timer = self.create_timer(0.1, self.control_loop)
 
-        self.get_logger().info("ACT NODE AVVIATO")
+        self.get_logger().info("ACT NODE AVVIATO (TwistStamped)")
 
     #funzione generale per inviare comandi di velocità al robot in base allo stato
     def send_cmd(self, linear, angular):
-        msg = Twist()
-        msg.linear.x = linear
-        msg.angular.z = angular
+        msg = TwistStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = 'base_link'
+        msg.twist.linear.x = linear
+        msg.twist.angular.z = angular
         self.cmd_pub.publish(msg)
 
     #definisce il comportamento in base al comando ricevuto dal PLAN
