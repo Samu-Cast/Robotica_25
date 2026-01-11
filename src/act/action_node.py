@@ -14,6 +14,7 @@ class ActState(Enum):
     FRONT = 3
     FRONT_RIGHT = 4
     RIGHT = 5
+    BACK = 6
     
     #SEARCH_VALVE = 3
     #ACTIVATE_VALVE = 4
@@ -67,39 +68,18 @@ class ActNode(Node):
 
         if command == "Front":
             self.state = ActState.FRONT
-            #self.reset_search()
-            #self.reset_activate()
-            # self.get_logger().info("PLAN → FRONT")
-
+        elif command == "Back":
+            self.state = ActState.BACK
         elif command == "Right":
             self.state = ActState.RIGHT
-            #self.reset_search()
-            #self.reset_activate()
-            # self.get_logger().info("PLAN → RIGHT") #lo restituisce nei casi in cui il PLAN chiede di girare a destra perche ha trovato un ostacolo
-
         elif command == "Left":
             self.state = ActState.LEFT
-            #self.reset_search()
-            #self.reset_activate()
-            # self.get_logger().info("PLAN → LEFT") #lo restituisce nei casi in cui il PLAN chiede di girare a sinistra perche ha trovato un ostacolo
-        
         elif command == "FrontLeft":
             self.state = ActState.FRONT_LEFT
-            #self.reset_search()
-            #self.reset_activate()
-            # self.get_logger().info("PLAN → FRONT_LEFT")
-
         elif command == "FrontRight":
             self.state = ActState.FRONT_RIGHT
-            #self.reset_search()
-            #self.reset_activate()
-            # self.get_logger().info("PLAN → FRONT_RIGHT")
-
         elif command == "Stop":
             self.state = ActState.STOP
-            #self.reset_search()
-            #self.reset_activate()
-            #self.get_logger().info("PLAN → STOP")
         
         '''
         elif command == "SearchValve":
@@ -125,6 +105,10 @@ class ActNode(Node):
         # FRONT: avanti continuo
         elif self.state == ActState.FRONT:
             self.send_cmd(0.2, 0.0)
+            
+        # BACK: indietro continuo
+        elif self.state == ActState.BACK:
+            self.send_cmd(-0.2, 0.0)
 
         #LEFT: rotazione continua finché PLAN non cambia
         elif self.state == ActState.LEFT:
@@ -134,13 +118,13 @@ class ActNode(Node):
         elif self.state == ActState.RIGHT:
             self.send_cmd(0.0, -0.5)
         
-        # FRONT_LEFT: leggermente a sinistra
+        # FRONT_LEFT: leggermente a sinistra (avanzando)
         elif self.state == ActState.FRONT_LEFT:
-            self.send_cmd(0.0, 0.25)
+            self.send_cmd(0.15, 0.25)
         
-        # FRONT_RIGHT: leggermente a destra
+        # FRONT_RIGHT: leggermente a destra (avanzando)
         elif self.state == ActState.FRONT_RIGHT:
-            self.send_cmd(0.0, -0.25)
+            self.send_cmd(0.15, -0.25)
 
     '''
         # SEARCH_VALVE: rotazione continua con memoria 
@@ -177,9 +161,15 @@ class ActNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = ActNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    
+    try:
+        rclpy.spin(node)
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

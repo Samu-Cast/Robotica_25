@@ -18,6 +18,8 @@ Publishes to:
 
 import json
 import random
+import math
+import time
 
 # ROS2 imports with fallback for testing
 try:
@@ -94,8 +96,6 @@ def calculate_closest_target(robot_pos, visited_targets):
     Returns:
         Dict with target info {'name', 'x', 'y', 'theta', 'distance'} or None if all visited
     """
-    import math
-    
     robot_x = robot_pos.get('x', 0.0)
     robot_y = robot_pos.get('y', 0.0)
     
@@ -145,8 +145,6 @@ def calculate_direction_to_target(robot_pos, target):
     Returns:
         str: 'MOVE_FORWARD', 'TURN_LEFT', or 'TURN_RIGHT'
     """
-    import math
-    
     robot_x = robot_pos.get('x', 0.0)
     robot_y = robot_pos.get('y', 0.0)
     robot_theta = robot_pos.get('theta', 0.0)
@@ -164,14 +162,15 @@ def calculate_direction_to_target(robot_pos, target):
         angle_diff += 2 * math.pi
     
     #Decide action based on angle difference
-    angle_threshold = 0.15  #~8.5 degrees tolerance
+    # Tolerance increased to prevent jitter (Hysteresis)
+    angle_threshold = 0.2  # ~11 degrees
     
     if abs(angle_diff) < angle_threshold:
         return 'MOVE_FORWARD'
     elif angle_diff > 0:
-        return 'TURN_LEFT'
+        return 'MOVE_FRONT_LEFT'
     else:
-        return 'TURN_RIGHT'
+        return 'MOVE_FRONT_RIGHT'
 
 
 def check_wall_alignment(distance_left, distance_right, threshold=0.05):
@@ -274,23 +273,41 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
         self.bb = self.attach_blackboard_client(name=self.name)
         self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
         self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
 
     def update(self):
+        # 1. Check if we already have a valid pending target (Persistence)
+        current = self.bb.get("current_target")
         visited = self.bb.get("visited_targets") or []
-
-        # Find first unvisited target
-        for target_name, target_data in KNOWN_TARGETS.items():
-            if target_name not in visited:
-                # Select this target
-                self.bb.set("current_target", {
-                    'name': target_name,
-                    'x': target_data['x'],
-                    'y': target_data['y'],
-                    'theta': target_data['theta']
-                })
-                return Status.SUCCESS
-
-        # All targets already visited
+        
+        if current and current['name'] not in visited:
+             # Keep current target until visited
+             return Status.SUCCESS
+             
+        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        
+        # 2. Select NEW closest unvisited target
+        closest_name = None
+        closest_dist = float('inf')
+        closest_data = None
+        
+        for name, data in KNOWN_TARGETS.items():
+            if name not in visited:
+                dist = (data['x'] - robot_pos['x'])**2 + (data['y'] - robot_pos['y'])**2
+                if dist < closest_dist:
+                    closest_dist = dist
+                    closest_name = name
+                    closest_data = data
+        
+        if closest_name:
+            self.bb.set("current_target", {
+                'name': closest_name,
+                'x': closest_data['x'],
+                'y': closest_data['y'],
+                'theta': closest_data['theta']
+            })
+            return Status.SUCCESS
+            
         return Status.FAILURE
 
 class AtTarget(py_trees.behaviour.Behaviour):
@@ -371,85 +388,162 @@ class AtTarget(py_trees.behaviour.Behaviour):
         # Not the valve - continue to next target
         return Status.SUCCESS
 
+class InitialRetreat(py_trees.behaviour.Behaviour):
+    """
+    Step 1: Move backward from the platform at startup.
+    Runs only once until completion.
+    """
+    def __init__(self):
+        super().__init__(name="InitialRetreat")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("startup_complete", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("startup_complete", access=py_trees.common.Access.READ)
+        self.start_time = None
+        self.duration = 4.0 # Seconds to retreat
+    
+    def update(self):
+        if self.bb.get("startup_complete"):
+            return Status.SUCCESS
+            
+        if self.start_time is None:
+            self.start_time = time.time()
+            
+        elapsed = time.time() - self.start_time
+        
+        if elapsed < self.duration:
+            self.bb.set("plan_action", "MOVE_BACKWARD")
+            return Status.RUNNING
+        else:
+            self.bb.set("plan_action", "STOP")
+            self.bb.set("startup_complete", True)
+            return Status.SUCCESS
+
 class MoveToTarget(py_trees.behaviour.Behaviour):
     """
-    Navigate towards closest target.
+    Advanced Navigation with Hysteresis & Obstacle Recovery.
     
     Logic:
-    - Always calculate direction to target (TURN_LEFT/TURN_RIGHT/MOVE_FORWARD)
-    - If ultrasonic detects very close obstacle → override with emergency avoidance
-    - Otherwise → navigate toward target continuously
-    - Camera-based person/obstacle avoidance handled by SearchObj behaviors
+    1. Check Ultrasonics (< 0.5m)
+       - If blocked: Enter AVOIDANCE mode (turn to open space).
+    2. Check AVOIDANCE recovery
+       - If was avoiding and now clear: Move Forward blindly (1-2s) to pass obstacle.
+    3. Navigation (Target)
+       - If clear: Calculate angle error.
+       - Only change direction if error is large (> threshold).
+       - Maintain current direction otherwise (Hysteresis).
     """
     def __init__(self):
         super().__init__(name="MoveToTarget")
         self.bb = self.attach_blackboard_client(name=self.name)
         
-        # Write access for action, goal, current_target
+        # Write access
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("goal_pose", access=py_trees.common.Access.WRITE)
-        self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         
-        # Read access for sensors and position
+        # Read access
+        self.bb.register_key("current_target", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
-        self.bb.register_key("visited_targets", access=py_trees.common.Access.READ)
-    
+        
+        # Internal State
+        self.avoiding = False
+        self.recovery_steps = 0
+        self.last_action = "STOP"
+
     def update(self):
-        # Read distance sensors (default to large value = no obstacle)
-        distance_left = self.bb.get("distance_left") or 999.0
-        distance_center = self.bb.get("distance_center") or 999.0
-        distance_right = self.bb.get("distance_right") or 999.0
-        
-        # Get robot position and visited targets
-        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
-        visited = self.bb.get("visited_targets") or []
-        
-        # Calculate closest unvisited target
-        closest = calculate_closest_target(robot_pos, visited)
-        
-        if not closest:
-            # All targets visited, go home
+        # 1. Get Target (Persistent)
+        target = self.bb.get("current_target")
+        if not target:
             self.bb.set("plan_action", "STOP")
-            return Status.SUCCESS
+            return Status.FAILURE # Should trigger CalculateTarget
+
+        # 2. Update Blackboard Goal (for logging/debug)
+        self.bb.set("goal_pose", target)
+
+        # 3. Read Sensors & Pos
+        d_left = self.bb.get("distance_left") or 999.0
+        d_center = self.bb.get("distance_center") or 999.0
+        d_right = self.bb.get("distance_right") or 999.0
+        robot_pos = self.bb.get("robot_position") or {'x':0, 'y':0, 'theta':0}
         
-        # Set current target
-        self.bb.set("current_target", closest)
+        # Thresholds
+        OBSTACLE_DIST = 0.5
         
-        # Set goal pose
-        goal_pose = {
-            'x': closest['x'],
-            'y': closest['y'],
-            'theta': closest['theta']
-        }
-        self.bb.set("goal_pose", goal_pose)
+        # --- LOGIC START ---
         
-        # ALWAYS calculate direction to target
-        target_action = calculate_direction_to_target(robot_pos, closest)
+        # A. OBSTACLE DETECTION
+        is_blocked = (d_center < OBSTACLE_DIST or d_left < OBSTACLE_DIST or d_right < OBSTACLE_DIST)
         
-        # Emergency obstacle avoidance - only when VERY close (ultrasonics)
-        emergency_threshold = 0.4  # meters - very close!
-        
-        # Check if all three sensors are blocked
-        all_blocked = (distance_left < emergency_threshold and 
-                      distance_center < emergency_threshold and 
-                      distance_right < emergency_threshold)
-        
-        if all_blocked:
-            # All sensors blocked → 90 degree turn (pick one direction consistently)
-            action = 'TURN_RIGHT'  # Always turn right when trapped
-        elif distance_center < emergency_threshold:
-            # Only center blocked - turn to more open side
-            if distance_left > distance_right:
-                action = 'TURN_LEFT'
+        if is_blocked:
+            self.avoiding = True
+            self.recovery_steps = 0 # Reset recovery
+            
+            # Escape Logic
+            if d_left < OBSTACLE_DIST and d_center < OBSTACLE_DIST and d_right < OBSTACLE_DIST:
+                 action = "TURN_RIGHT" # Trapped -> Spin
+            elif d_left > d_right:
+                action = "TURN_LEFT" # Left is open
             else:
-                action = 'TURN_RIGHT'
-        else:
-            # No close obstacle → use calculated direction to target
-            action = target_action
+                action = "TURN_RIGHT" # Right is open (or both blocked center)
+                
+            self.last_action = action
+            self.bb.set("plan_action", action)
+            return Status.RUNNING
+
+        # B. RECOVERY (Post-Avoidance)
+        if self.avoiding:
+            # Obstacle is cleared, but we need to move away from it before turning back
+            if self.recovery_steps < 15: # ~1.5 seconds at 10Hz
+                action = "MOVE_FORWARD"
+                self.recovery_steps += 1
+                self.bb.set("plan_action", action)
+                return Status.RUNNING
+            else:
+                # Recovery done, resume navigation
+                self.avoiding = False
         
+        # C. NAVIGATION (Hysteresis)
+        # Calculate angle error to target
+        robot_x = robot_pos.get('x', 0.0)
+        robot_y = robot_pos.get('y', 0.0)
+        robot_theta = robot_pos.get('theta', 0.0)
+        
+        dx = target['x'] - robot_x
+        dy = target['y'] - robot_y
+        target_angle = math.atan2(dy, dx)
+        
+        angle_diff = target_angle - robot_theta
+        while angle_diff > math.pi:
+            angle_diff -= 2 * math.pi
+        while angle_diff < -math.pi:
+            angle_diff += 2 * math.pi
+        
+        # Hysteresis thresholds
+        HYSTERESIS_THRESHOLD = 0.4  # ~23 degrees - switch action only if error is big
+        ALIGNMENT_THRESHOLD = 0.2   # ~11 degrees - considered aligned with target
+        
+        # Decision logic with hysteresis
+        if abs(angle_diff) < ALIGNMENT_THRESHOLD:
+            # Well aligned - go straight
+            action = 'MOVE_FORWARD'
+        elif abs(angle_diff) > HYSTERESIS_THRESHOLD:
+            # Big error - need to correct
+            if angle_diff > 0:
+                action = 'MOVE_FRONT_LEFT'
+            else:
+                action = 'MOVE_FRONT_RIGHT'
+        else:
+            # Medium error - maintain previous action (hysteresis)
+            if self.last_action in ['MOVE_FORWARD', 'MOVE_FRONT_LEFT', 'MOVE_FRONT_RIGHT']:
+                action = self.last_action
+            else:
+                # Was doing something else (avoidance) - pick appropriate
+                action = 'MOVE_FORWARD'
+        
+        self.last_action = action
         self.bb.set("plan_action", action)
         return Status.RUNNING
 
@@ -735,6 +829,7 @@ def build_tree():
     
     #Main mission sequence
     main = Sequence("Main", memory=True, children=[
+        InitialRetreat(),
         battery,
         CalculateTarget(),
         goto,
@@ -752,8 +847,11 @@ def build_tree():
 #Mapping from internal actions to Act module commands
 ACTION_TO_COMMAND = {
     'MOVE_FORWARD': 'Front',
+    'MOVE_BACKWARD': 'Back',
     'TURN_LEFT': 'Left',
     'TURN_RIGHT': 'Right',
+    'MOVE_FRONT_LEFT': 'FrontLeft',
+    'MOVE_FRONT_RIGHT': 'FrontRight',
     'STOP': 'Stop',
     'IDLE': 'Stop',
     'AVOID_OBSTACLE': 'Left',
@@ -788,7 +886,7 @@ class PlanNode(Node):
             'plan_action', 'goal_pose', 'mission_complete',
             'detected_color', 'reset_odom', 'detection_zone',
             'distance_left', 'distance_center', 'distance_right',
-            'robot_position'
+            'robot_position', 'startup_complete'
         ]
         for key in blackboard_keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
@@ -849,6 +947,7 @@ class PlanNode(Node):
         self.bb.set("distance_center", 999.0)
         self.bb.set("distance_right", 999.0)
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
+        self.bb.set("startup_complete", False)
     
     def _proximity_cb(self, msg, sensor):
         """
@@ -964,11 +1063,12 @@ def main(args=None):
     
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
