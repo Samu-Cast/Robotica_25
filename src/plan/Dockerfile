@@ -19,8 +19,14 @@ RUN pip3 install -r requirements.txt --break-system-packages
 # Aggiungi il source di ROS2 al .bashrc per le sessioni interattive
 RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/ubuntu/.bashrc
 
+# Copia l'entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Passa all'utente ubuntu per l'esecuzione
 USER ubuntu
 
-# Avvio del nodo PLAN
-CMD ["bash"]
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Default command: avvia plan_node
+CMD ["python3", "plan_node.py"]

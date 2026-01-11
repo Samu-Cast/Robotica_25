@@ -877,6 +877,19 @@ class PlanNode(Node):
         action = self.bb.get("plan_action") or "STOP"
         command = ACTION_TO_COMMAND.get(action, "Stop")
         
+        # DEBUG ─────────────────────────────────────────────
+        dist_c = self.bb.get("distance_center")
+        dist_l = self.bb.get("distance_left")
+        dist_r = self.bb.get("distance_right")
+        target = self.bb.get("current_target")
+        target_name = target.get('name') if target else None
+        self.get_logger().info(
+            f"[DEBUG] action={action} → cmd={command} | "
+            f"dist(L/C/R)={dist_l:.2f}/{dist_c:.2f}/{dist_r:.2f} | "
+            f"target={target_name}"
+        )
+        # ───────────────────────────────────────────────────
+        
         msg = String()
         msg.data = command
         self.cmd_pub.publish(msg)
