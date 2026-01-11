@@ -373,11 +373,12 @@ class AtTarget(py_trees.behaviour.Behaviour):
 
 class MoveToTarget(py_trees.behaviour.Behaviour):
     """
-    Navigate towards closest target using odometry-based direction.
+    Navigate towards closest target.
     
     Logic:
-    - If sensors detect nearby obstacles → use obstacle avoidance
-    - If no obstacles → calculate direction to closest target using odometry
+    - Go straight by default
+    - Only use ultrasonic sensors for emergency obstacle avoidance (very close)
+    - Camera-based detection (person/obstacle) handled by other behaviors
     """
     def __init__(self):
         super().__init__(name="MoveToTarget")
@@ -424,18 +425,17 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         }
         self.bb.set("goal_pose", goal_pose)
         
-        # Check if obstacles nearby (need avoidance)
-        obstacle_threshold = 0.6  # meters
-        obstacles_nearby = (distance_center < obstacle_threshold or 
-                           distance_left < obstacle_threshold or 
-                           distance_right < obstacle_threshold)
-        
-        if obstacles_nearby:
-            # Use sensor-based obstacle avoidance
-            action = calculate_best_direction(distance_left, distance_center, distance_right)
+        # Emergency obstacle avoidance - only when very close (ultrasonics)
+        emergency_threshold = 0.35  # meters - very close!
+        if distance_center < emergency_threshold:
+            # Obstacle directly ahead - turn to more open side
+            if distance_left > distance_right:
+                action = 'TURN_LEFT'
+            else:
+                action = 'TURN_RIGHT'
         else:
-            # No obstacles - calculate direction to target using odometry
-            action = calculate_direction_to_target(robot_pos, closest)
+            # Default: go straight! Camera-based avoidance handled by SearchObj
+            action = 'MOVE_FORWARD'
         
         self.bb.set("plan_action", action)
         return Status.RUNNING
@@ -523,25 +523,71 @@ class SignalPerson(py_trees.behaviour.Behaviour):
         return Status.SUCCESS
 
 class GoAroundP(py_trees.behaviour.Behaviour):
-    """Set action to avoid person obstacle."""
+    """
+    Smart avoidance for person - turn to the opposite side of where person is detected.
+    Uses detection_zone from camera to decide direction.
+    """
     def __init__(self):
         super().__init__(name="GoAroundP")
         self.bb = self.attach_blackboard_client(name=self.name)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
     
     def update(self):
-        self.bb.set("plan_action", "AVOID_OBSTACLE")
+        zone = self.bb.get("detection_zone")
+        dist_left = self.bb.get("distance_left") or 999.0
+        dist_right = self.bb.get("distance_right") or 999.0
+        
+        # Turn opposite to where person is detected
+        if zone == 'left':
+            # Person on left → turn right
+            action = 'TURN_RIGHT'
+        elif zone == 'right':
+            # Person on right → turn left
+            action = 'TURN_LEFT'
+        else:
+            # Person in center → turn to more open side
+            if dist_left > dist_right:
+                action = 'TURN_LEFT'
+            else:
+                action = 'TURN_RIGHT'
+        
+        self.bb.set("plan_action", action)
         return Status.SUCCESS
 
 class GoAroundO(py_trees.behaviour.Behaviour):
-    """Set action to avoid generic obstacle."""
+    """
+    Smart avoidance for obstacle - turn to the opposite side of where obstacle is detected.
+    Uses detection_zone from camera to decide direction.
+    """
     def __init__(self):
         super().__init__(name="GoAroundO")
         self.bb = self.attach_blackboard_client(name=self.name)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
     
     def update(self):
-        self.bb.set("plan_action", "AVOID_OBSTACLE")
+        zone = self.bb.get("detection_zone")
+        dist_left = self.bb.get("distance_left") or 999.0
+        dist_right = self.bb.get("distance_right") or 999.0
+        
+        # Turn opposite to where obstacle is detected
+        if zone == 'left':
+            action = 'TURN_RIGHT'
+        elif zone == 'right':
+            action = 'TURN_LEFT'
+        else:
+            # Obstacle in center → turn to more open side
+            if dist_left > dist_right:
+                action = 'TURN_LEFT'
+            else:
+                action = 'TURN_RIGHT'
+        
+        self.bb.set("plan_action", action)
         return Status.SUCCESS
 
 class ActiveValve(py_trees.behaviour.Behaviour):
@@ -727,7 +773,7 @@ class PlanNode(Node):
             'battery', 'obstacles', 'detections', 'targets',
             'current_target', 'visited_targets', 'found', 'signals',
             'plan_action', 'goal_pose', 'mission_complete',
-            'detected_color', 'reset_odom',  # removed yolo_valve
+            'detected_color', 'reset_odom', 'detection_zone',
             'distance_left', 'distance_center', 'distance_right',
             'robot_position'
         ]
@@ -784,6 +830,7 @@ class PlanNode(Node):
         
         #Sensor data from Sense module
         self.bb.set("detected_color", None)
+        self.bb.set("detection_zone", None)
         self.bb.set("reset_odom", None)
         self.bb.set("distance_left", 999.0)
         self.bb.set("distance_center", 999.0)
@@ -840,6 +887,9 @@ class PlanNode(Node):
             
             #Set detected_color from detection
             self.bb.set("detected_color", det.get('color'))
+            
+            #Set detection_zone for smart avoidance
+            self.bb.set("detection_zone", det.get('zone'))
             
             #Build detections dict for compatibility
             detections = {}
