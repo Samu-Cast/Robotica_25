@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y \
 
 # Installiamo YOLO e librerie Python necessarie
 COPY requirements.txt .
-RUN pip3 install -r requirements.txt --break-system-packages 
+RUN pip3 install --no-cache-dir --default-timeout=300 --retries 10 -r requirements.txt --break-system-packages 
 
 # Aggiungi il source di ROS2 al .bashrc per le sessioni interattive
 RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/ubuntu/.bashrc

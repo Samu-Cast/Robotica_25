@@ -9,7 +9,7 @@ services:
     networks:
       - ros_net
     ports:
-      - "8081:80"
+      - "8080:80"
     shm_size: '2gb'
     environment:
       - VNC_PASSWORD=password
@@ -39,7 +39,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2.0'
+          cpus: '1.0'
           memory: 4G
     stdin_open: true
     tty: true
