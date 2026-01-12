@@ -52,6 +52,14 @@ KNOWN_TARGETS = {
     'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
     'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0}, #This is actually the valve, but robot doesn't know
 }
+
+#HOME/SPAWN POSITION - Will be saved automatically when robot starts
+#This is just a fallback default if robot_position is not available at startup
+HOME_POSITION_DEFAULT = {
+    'x': 0.0,
+    'y': 0.0,
+    'theta': 0.0
+}
 ##########################################################################
 
 
@@ -228,10 +236,11 @@ class GoCharge(py_trees.behaviour.Behaviour):
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("goal_pose", access=py_trees.common.Access.WRITE)
         
-        # Read access for distance sensors
+        # Read access for distance sensors and home position
         self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+        self.bb.register_key("home_position", access=py_trees.common.Access.READ)
     
     def update(self):
         battery = self.bb.get("battery")
@@ -241,13 +250,17 @@ class GoCharge(py_trees.behaviour.Behaviour):
         distance_center = self.bb.get("distance_center") or 999.0
         distance_right = self.bb.get("distance_right") or 999.0
         
-        # Set goal to charging station (spawn point)
+        # Set goal to charging station (spawn platform - saved at startup)
+        home_pos = self.bb.get("home_position") or HOME_POSITION_DEFAULT
         goal_pose = {
-            'x': 0.0,
-            'y': 0.0,
-            'theta': 3.14159  # Facing backward (π radians = 180°)
+            'x': home_pos['x'],
+            'y': home_pos['y'],
+            'theta': home_pos['theta']
         }
         self.bb.set("goal_pose", goal_pose)
+        
+        # DEBUG: Log ritorno alla base
+        print(f"[DEBUG][GoCharge] Batteria scarica! Ritorno alla piattaforma ({home_pos['x']:.2f}, {home_pos['y']:.2f})")
         
         # Calculate optimal direction based on 3 sensors
         action = calculate_best_direction(distance_left, distance_center, distance_right)
@@ -274,6 +287,7 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
         self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self._last_logged_target = None  # Evita spam di log
 
     def update(self):
         # 1. Check if we already have a valid pending target (Persistence)
@@ -306,8 +320,15 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
                 'y': closest_data['y'],
                 'theta': closest_data['theta']
             })
+            # DEBUG: Log nuovo target selezionato
+            if closest_name != self._last_logged_target:
+                print(f"[DEBUG][CalculateTarget] Nuovo target: {closest_name.upper()} @ ({closest_data['x']:.2f}, {closest_data['y']:.2f}) | Distanza: {math.sqrt(closest_dist):.2f}m")
+                print(f"[DEBUG][CalculateTarget] Posizione robot: ({robot_pos['x']:.2f}, {robot_pos['y']:.2f}) | Visitati: {visited}")
+                self._last_logged_target = closest_name
             return Status.SUCCESS
-            
+        
+        # DEBUG: Tutti i target visitati
+        print(f"[DEBUG][CalculateTarget] Tutti i target visitati: {visited}")
         return Status.FAILURE
 
 class AtTarget(py_trees.behaviour.Behaviour):
@@ -349,18 +370,25 @@ class AtTarget(py_trees.behaviour.Behaviour):
             # Not near target yet
             return Status.FAILURE
         
+        # DEBUG: Vicino al muro
+        print(f"[DEBUG][AtTarget] Vicino al muro! Distanza centro: {dist_center:.2f}m (soglia: {near_wall_threshold}m)")
+        
         # Step 2: Check wall alignment (left == right)
         if not check_wall_alignment(dist_left, dist_right, threshold=0.08):
             # Not aligned - adjust robot orientation
             if dist_left is not None and dist_right is not None:
+                diff = abs(dist_left - dist_right)
                 if dist_left > dist_right:
                     self.bb.set("plan_action", "TURN_LEFT")
+                    print(f"[DEBUG][AtTarget] Allineamento: giro a SINISTRA (diff: {diff:.2f}m)")
                 else:
                     self.bb.set("plan_action", "TURN_RIGHT")
+                    print(f"[DEBUG][AtTarget] Allineamento: giro a DESTRA (diff: {diff:.2f}m)")
             return Status.RUNNING
         
         # Step 3: Aligned! Stop and check color
         self.bb.set("plan_action", "STOP")
+        print(f"[DEBUG][AtTarget] Allineato con il muro! L={dist_left:.2f}m R={dist_right:.2f}m")
         
         detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
@@ -378,19 +406,23 @@ class AtTarget(py_trees.behaviour.Behaviour):
         if target_name not in visited:
             visited.append(target_name)
             self.bb.set("visited_targets", visited)
+            print(f"[DEBUG][AtTarget] Target {target_name.upper()} raggiunto e marcato come visitato!")
         
         # Step 4: Check if this is the valve (red color)
         if detected_color == "red":
             # FOUND THE VALVE!
+            print(f"[DEBUG][AtTarget] VALVOLA TROVATA! Colore rilevato: {detected_color}")
             self.bb.set("found", "valve")
             return Status.SUCCESS
         
         # Not the valve - continue to next target
+        print(f"[DEBUG][AtTarget] Colore rilevato: {detected_color or 'nessuno'} - Non è la valvola, continuo...")
         return Status.SUCCESS
 
 class InitialRetreat(py_trees.behaviour.Behaviour):
     """
     Step 1: Move backward from the platform at startup.
+    Saves initial spawn position before retreating.
     Runs only once until completion.
     """
     def __init__(self):
@@ -399,24 +431,47 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("startup_complete", access=py_trees.common.Access.WRITE)
         self.bb.register_key("startup_complete", access=py_trees.common.Access.READ)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("home_position", access=py_trees.common.Access.WRITE)
         self.start_time = None
         self.duration = 4.0 # Seconds to retreat
+        self._logged_start = False
+        self._home_saved = False
     
     def update(self):
         if self.bb.get("startup_complete"):
             return Status.SUCCESS
+        
+        # FIRST: Save initial position as home BEFORE moving
+        if not self._home_saved:
+            robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+            home_position = {
+                'x': robot_pos['x'],
+                'y': robot_pos['y'],
+                'theta': robot_pos['theta']
+            }
+            self.bb.set("home_position", home_position)
+            self._home_saved = True
+            print(f"[DEBUG][InitialRetreat] HOME salvata: ({home_position['x']:.2f}, {home_position['y']:.2f}) theta={math.degrees(home_position['theta']):.1f}°")
             
         if self.start_time is None:
             self.start_time = time.time()
+            # DEBUG: Log inizio retreat
+            print(f"[DEBUG][InitialRetreat] Inizio arretramento dalla piattaforma ({self.duration}s)...")
             
         elapsed = time.time() - self.start_time
         
         if elapsed < self.duration:
             self.bb.set("plan_action", "MOVE_BACKWARD")
+            # DEBUG: Log progresso ogni secondo
+            if int(elapsed) > int(elapsed - 0.1) and not self._logged_start:
+                print(f"[DEBUG][InitialRetreat] Arretramento... {elapsed:.1f}s / {self.duration}s")
             return Status.RUNNING
         else:
             self.bb.set("plan_action", "STOP")
             self.bb.set("startup_complete", True)
+            # DEBUG: Log completamento
+            print(f"[DEBUG][InitialRetreat] Arretramento completato! Inizio navigazione...")
             return Status.SUCCESS
 
 class MoveToTarget(py_trees.behaviour.Behaviour):
@@ -452,6 +507,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         self.avoiding = False
         self.recovery_steps = 0
         self.last_action = "STOP"
+        self._debug_tick = 0  # Contatore per logging periodico
 
     def update(self):
         # 1. Get Target (Persistent)
@@ -478,32 +534,56 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         is_blocked = (d_center < OBSTACLE_DIST or d_left < OBSTACLE_DIST or d_right < OBSTACLE_DIST)
         
         if is_blocked:
+            # DEBUG: Log ostacolo rilevato
+            if not self.avoiding:
+                print(f"[DEBUG][MoveToTarget] OSTACOLO RILEVATO! Distanze: L={d_left:.2f}m C={d_center:.2f}m R={d_right:.2f}m")
+            
             self.avoiding = True
             self.recovery_steps = 0 # Reset recovery
             
             # Escape Logic
             if d_left < OBSTACLE_DIST and d_center < OBSTACLE_DIST and d_right < OBSTACLE_DIST:
                  action = "TURN_RIGHT" # Trapped -> Spin
+                 if self._debug_tick % 10 == 0:
+                     print(f"[DEBUG][MoveToTarget] INTRAPPOLATO! Rotazione a destra...")
             elif d_left > d_right:
                 action = "TURN_LEFT" # Left is open
+                if self._debug_tick % 10 == 0:
+                    print(f"[DEBUG][MoveToTarget] Evitamento: giro a SINISTRA (più spazio)")
             else:
                 action = "TURN_RIGHT" # Right is open (or both blocked center)
+                if self._debug_tick % 10 == 0:
+                    print(f"[DEBUG][MoveToTarget] Evitamento: giro a DESTRA")
                 
             self.last_action = action
             self.bb.set("plan_action", action)
+            self._debug_tick += 1
             return Status.RUNNING
 
         # B. RECOVERY (Post-Avoidance)
         if self.avoiding:
             # Obstacle is cleared, but we need to move away from it before turning back
             if self.recovery_steps < 15: # ~1.5 seconds at 10Hz
+                if self.recovery_steps == 0:
+                    print(f"[DEBUG][MoveToTarget] Recupero post-ostacolo: avanzo per superare...")
                 action = "MOVE_FORWARD"
                 self.recovery_steps += 1
                 self.bb.set("plan_action", action)
                 return Status.RUNNING
             else:
-                # Recovery done, resume navigation
+                # Recovery done, recalculate path from new position
                 self.avoiding = False
+                
+                # Calculate new distance and angle from current position
+                new_dx = target['x'] - robot_pos.get('x', 0.0)
+                new_dy = target['y'] - robot_pos.get('y', 0.0)
+                new_distance = math.sqrt(new_dx**2 + new_dy**2)
+                new_angle = math.atan2(new_dy, new_dx)
+                angle_error = math.degrees(new_angle - robot_pos.get('theta', 0.0))
+                
+                print(f"[DEBUG][MoveToTarget] Recupero completato! RICALCOLO PERCORSO...")
+                print(f"[DEBUG][MoveToTarget] Nuova posizione: ({robot_pos.get('x', 0.0):.2f}, {robot_pos.get('y', 0.0):.2f})")
+                print(f"[DEBUG][MoveToTarget] Target {target['name'].upper()}: distanza={new_distance:.2f}m, errore angolare={angle_error:.1f}°")
         
         # C. NAVIGATION (Hysteresis)
         # Calculate angle error to target
@@ -513,6 +593,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         
         dx = target['x'] - robot_x
         dy = target['y'] - robot_y
+        distance_to_target = math.sqrt(dx**2 + dy**2)
         target_angle = math.atan2(dy, dx)
         
         angle_diff = target_angle - robot_theta
@@ -543,6 +624,14 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
                 # Was doing something else (avoidance) - pick appropriate
                 action = 'MOVE_FORWARD'
         
+        # DEBUG: Log navigazione periodico (ogni 20 tick = 2 secondi)
+        if self._debug_tick % 20 == 0:
+            angle_deg = math.degrees(angle_diff)
+            theta_deg = math.degrees(robot_theta)
+            print(f"[DEBUG][MoveToTarget] NAV → {target['name'].upper()} | Dist: {distance_to_target:.2f}m | Errore ang: {angle_deg:.1f}° | Azione: {action}")
+            print(f"[DEBUG][MoveToTarget] Pos: ({robot_x:.2f}, {robot_y:.2f}) θ={theta_deg:.1f}° | Sensori: L={d_left:.2f} C={d_center:.2f} R={d_right:.2f}")
+        
+        self._debug_tick += 1
         self.last_action = action
         self.bb.set("plan_action", action)
         return Status.RUNNING
@@ -718,6 +807,14 @@ class ActiveValve(py_trees.behaviour.Behaviour):
         # Set action and mission complete flag
         self.bb.set("plan_action", "ACTIVATE_VALVE")
         self.bb.set("mission_complete", True)
+        
+        # DEBUG: Missione completata!
+        print(f"")
+        print(f"[DEBUG][ActiveValve] ══════════════════════════════════════")
+        print(f"[DEBUG][ActiveValve] MISSIONE COMPLETATA! VALVOLA ATTIVATA!")
+        print(f"[DEBUG][ActiveValve] ══════════════════════════════════════")
+        print(f"")
+        
         return Status.SUCCESS
 
 class GoHome(py_trees.behaviour.Behaviour):
@@ -729,12 +826,16 @@ class GoHome(py_trees.behaviour.Behaviour):
         super().__init__(name="GoHome")
         self.bb = self.attach_blackboard_client(name=self.name)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("home_position", access=py_trees.common.Access.READ)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("goal_pose", access=py_trees.common.Access.WRITE)
     
     def update(self):
-        # Home position = spawn point (0, 0)
-        home_x, home_y = 0.0, 0.0
+        # Home position = spawn platform (saved at startup by InitialRetreat)
+        home_pos = self.bb.get("home_position") or HOME_POSITION_DEFAULT
+        home_x = home_pos['x']
+        home_y = home_pos['y']
+        home_theta = home_pos['theta']
         
         # Get current robot position from odometry
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
@@ -744,16 +845,22 @@ class GoHome(py_trees.behaviour.Behaviour):
         # Calculate Euclidean distance to home
         distance = ((current_x - home_x)**2 + (current_y - home_y)**2)**0.5
         
+        # DEBUG: Log periodico navigazione verso casa
+        if not hasattr(self, '_logged_going_home'):
+            self._logged_going_home = True
+            print(f"[DEBUG][GoHome] Ritorno alla piattaforma di spawn ({home_x:.2f}, {home_y:.2f}) theta={math.degrees(home_theta):.1f}°")
+        
         # If close to home (< 0.3m), stop
         if distance < 0.3:
             self.bb.set("plan_action", "STOP")
+            print(f"[DEBUG][GoHome] Arrivato alla piattaforma! Distanza: {distance:.2f}m")
             return Status.SUCCESS
         
         # Otherwise, set goal to home and continue moving
         goal_pose = {
             'x': home_x,
             'y': home_y,
-            'theta': 0.0
+            'theta': home_theta
         }
         self.bb.set("goal_pose", goal_pose)
         self.bb.set("plan_action", "MOVE_TO_GOAL")
@@ -886,7 +993,7 @@ class PlanNode(Node):
             'plan_action', 'goal_pose', 'mission_complete',
             'detected_color', 'reset_odom', 'detection_zone',
             'distance_left', 'distance_center', 'distance_right',
-            'robot_position', 'startup_complete'
+            'robot_position', 'startup_complete', 'home_position'
         ]
         for key in blackboard_keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)

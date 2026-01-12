@@ -65,6 +65,7 @@ class ActNode(Node):
     #definisce il comportamento in base al comando ricevuto dal PLAN
     def plan_callback(self, msg):
         command = msg.data #prende il comando come stringa
+        prev_state = self.state
 
         if command == "Front":
             self.state = ActState.FRONT
@@ -80,6 +81,20 @@ class ActNode(Node):
             self.state = ActState.FRONT_RIGHT
         elif command == "Stop":
             self.state = ActState.STOP
+        
+        # DEBUG: Log cambio di stato
+        if self.state != prev_state:
+            state_emoji = {
+                ActState.STOP: "🛑",
+                ActState.FRONT: "⬆️",
+                ActState.BACK: "⬇️",
+                ActState.LEFT: "⬅️",
+                ActState.RIGHT: "➡️",
+                ActState.FRONT_LEFT: "↖️",
+                ActState.FRONT_RIGHT: "↗️",
+            }
+            emoji = state_emoji.get(self.state, "❓")
+            self.get_logger().info(f"[DEBUG][Act] {emoji} Comando: {command} | Stato: {prev_state.name} → {self.state.name}")
         
         '''
         elif command == "SearchValve":
