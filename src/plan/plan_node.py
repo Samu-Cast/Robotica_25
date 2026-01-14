@@ -287,6 +287,7 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
         self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
         self._last_logged_target = None  # Evita spam di log
 
     def update(self):
@@ -298,7 +299,15 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
              # Keep current target until visited
              return Status.SUCCESS
              
-        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        
+        # Apply odometry correction if available
+        odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+        robot_pos = {
+            'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
+            'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
+            'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+        }
         
         # 2. Select NEW closest unvisited target
         closest_name = None
@@ -333,26 +342,43 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
 
 class AtTarget(py_trees.behaviour.Behaviour):
     """
-    Check if robot has arrived at target and verify if it's the valve.
+    Check if robot has arrived at target and center on color.
     
     Logic:
     1. Check if near target (sensors detecting wall)
-    2. Align robot with wall (left == right distance)
-    3. Check if detected_color == red (valve)
+    2. CENTER on color: rotate slowly to maximize visible color area
+    3. When area starts decreasing, STOP and check color
     4. If valve → SUCCESS, else mark visited and continue
     """
     def __init__(self):
         super().__init__(name="AtTarget")
         self.bb = self.attach_blackboard_client(name=self.name)
-        self.bb.register_key("current_target", access=py_trees.common.Access.READ)
+        self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
+        self.bb.register_key("color_area", access=py_trees.common.Access.READ)
         self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
-        self.bb.register_key("reset_odom", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("found", access=py_trees.common.Access.WRITE)
+        
+        # Internal state for centering behavior
+        self.centering_state = 'APPROACHING'  # APPROACHING, CENTERING, DONE
+        self.max_area_seen = 0
+        self.area_history = []  # Track last N area readings
+        self.rotation_direction = 'LEFT'  # Start by rotating left
+        self.stable_count = 0  # Count of stable readings
+
+    def initialise(self):
+        """Reset centering state when behavior starts."""
+        self.centering_state = 'APPROACHING'
+        self.max_area_seen = 0
+        self.area_history = []
+        self.rotation_direction = 'LEFT'
+        self.stable_count = 0
 
     def update(self):
         target = self.bb.get("current_target")
@@ -364,42 +390,82 @@ class AtTarget(py_trees.behaviour.Behaviour):
         dist_right = self.bb.get("distance_right")
         dist_center = self.bb.get("distance_center")
         
+        # Read color area
+        current_area = self.bb.get("color_area") or 0
+        
         # Step 1: Check if we're near target (center sensor detects wall)
         near_wall_threshold = 0.8  # meters
         if dist_center is None or dist_center > near_wall_threshold:
             # Not near target yet
+            self.centering_state = 'APPROACHING'
             return Status.FAILURE
         
         # DEBUG: Vicino al muro
-        print(f"[DEBUG][AtTarget] Vicino al muro! Distanza centro: {dist_center:.2f}m (soglia: {near_wall_threshold}m)")
+        if self.centering_state == 'APPROACHING':
+            print(f"[DEBUG][AtTarget] Vicino al muro! Distanza centro: {dist_center:.2f}m - Inizio CENTERING")
+            self.centering_state = 'CENTERING'
+            self.max_area_seen = current_area
+            self.area_history = [current_area]
         
-        # Step 2: Check wall alignment (left == right)
-        if not check_wall_alignment(dist_left, dist_right, threshold=0.08):
-            # Not aligned - adjust robot orientation
-            if dist_left is not None and dist_right is not None:
-                diff = abs(dist_left - dist_right)
-                if dist_left > dist_right:
+        # Step 2: CENTERING - rotate to maximize color area
+        if self.centering_state == 'CENTERING':
+            # Add current area to history
+            self.area_history.append(current_area)
+            if len(self.area_history) > 5:
+                self.area_history.pop(0)
+            
+            # Calculate average of recent readings for stability
+            avg_area = sum(self.area_history) / len(self.area_history)
+            
+            # Update max area seen
+            if current_area > self.max_area_seen:
+                self.max_area_seen = current_area
+                self.stable_count = 0
+            
+            # Check if area is stable (not increasing anymore)
+            area_decrease_threshold = 0.9  # 90% of max
+            if avg_area < self.max_area_seen * area_decrease_threshold and self.max_area_seen > 1000:
+                # Area is decreasing - we passed the optimal point
+                # Reverse direction briefly to go back to max
+                self.stable_count += 1
+                
+                if self.stable_count >= 3:
+                    # Centered! Stop here
+                    print(f"[DEBUG][AtTarget] CENTRATO! Area max: {self.max_area_seen}, Area attuale: {current_area:.0f}")
+                    self.centering_state = 'DONE'
+            else:
+                # Keep rotating slowly
+                self.stable_count = 0
+                if self.rotation_direction == 'LEFT':
                     self.bb.set("plan_action", "TURN_LEFT")
-                    print(f"[DEBUG][AtTarget] Allineamento: giro a SINISTRA (diff: {diff:.2f}m)")
                 else:
                     self.bb.set("plan_action", "TURN_RIGHT")
-                    print(f"[DEBUG][AtTarget] Allineamento: giro a DESTRA (diff: {diff:.2f}m)")
-            return Status.RUNNING
+                
+                if len(self.area_history) >= 3 and self.area_history[-1] < self.area_history[-3]:
+                    # Area decreasing - reverse direction
+                    self.rotation_direction = 'RIGHT' if self.rotation_direction == 'LEFT' else 'LEFT'
+                    print(f"[DEBUG][AtTarget] Inversione direzione: {self.rotation_direction}")
+                    
+                print(f"[DEBUG][AtTarget] Centering... Area: {current_area:.0f} (max: {self.max_area_seen:.0f}) | Dir: {self.rotation_direction}")
+                return Status.RUNNING
         
-        # Step 3: Aligned! Stop and check color
+        # Step 3: DONE - Stop and check color
         self.bb.set("plan_action", "STOP")
-        print(f"[DEBUG][AtTarget] Allineato con il muro! L={dist_left:.2f}m R={dist_right:.2f}m")
         
         detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
         
-        # Reset odometry to known target position
-        reset_pose = {
-            'x': target['x'],
-            'y': target['y'],
-            'theta': target['theta']
+        print(f"[DEBUG][AtTarget] Allineato con area massima! Area: {current_area:.0f}")
+        
+        # Calculate odometry correction offset
+        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        odom_correction = {
+            'dx': target['x'] - robot_pos.get('x', 0.0),
+            'dy': target['y'] - robot_pos.get('y', 0.0),
+            'dtheta': target['theta'] - robot_pos.get('theta', 0.0)
         }
-        self.bb.set("reset_odom", reset_pose)
+        self.bb.set("odom_correction", odom_correction)
+        print(f"[DEBUG][AtTarget] Correzione odometria: dx={odom_correction['dx']:.2f}m, dy={odom_correction['dy']:.2f}m, dθ={math.degrees(odom_correction['dtheta']):.1f}°")
         
         # Mark target as visited
         visited = self.bb.get("visited_targets") or []
@@ -415,8 +481,9 @@ class AtTarget(py_trees.behaviour.Behaviour):
             self.bb.set("found", "valve")
             return Status.SUCCESS
         
-        # Not the valve - continue to next target
-        print(f"[DEBUG][AtTarget] Colore rilevato: {detected_color or 'nessuno'} - Non è la valvola, continuo...")
+        # Not the valve - clear current_target so CalculateTarget picks the next one
+        self.bb.set("current_target", None)
+        print(f"[DEBUG][AtTarget] Colore rilevato: {detected_color or 'nessuno'} - Non è la valvola, passo al prossimo target...")
         return Status.SUCCESS
 
 class InitialRetreat(py_trees.behaviour.Behaviour):
@@ -502,6 +569,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
         
         # Internal State
         self.avoiding = False
@@ -523,7 +591,15 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         d_left = self.bb.get("distance_left") or 999.0
         d_center = self.bb.get("distance_center") or 999.0
         d_right = self.bb.get("distance_right") or 999.0
-        robot_pos = self.bb.get("robot_position") or {'x':0, 'y':0, 'theta':0}
+        robot_pos_raw = self.bb.get("robot_position") or {'x':0, 'y':0, 'theta':0}
+        
+        # Apply odometry correction if available
+        odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+        robot_pos = {
+            'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
+            'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
+            'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+        }
         
         # Thresholds
         OBSTACLE_DIST = 0.5
@@ -934,13 +1010,22 @@ def build_tree():
         move_search
     ])
     
+    #Target search loop: keep searching until valve is found
+    #This inner loop repeats CalculateTarget → GoToTarget until RecognitionValve succeeds
+    target_search = Sequence("TargetSearch", memory=False, children=[
+        CalculateTarget(),
+        goto,
+        RecognitionValve()
+    ])
+    
+    #Retry target search until valve is found (-1 = infinite retries)
+    target_loop = decorators.Retry("TargetLoop", child=target_search, num_failures=-1)
+    
     #Main mission sequence
     main = Sequence("Main", memory=True, children=[
         InitialRetreat(),
         battery,
-        CalculateTarget(),
-        goto,
-        RecognitionValve(),
+        target_loop,  # Loop until valve found
         ActiveValve(),
         GoHome()
     ])
@@ -991,7 +1076,7 @@ class PlanNode(Node):
             'battery', 'obstacles', 'detections', 'targets',
             'current_target', 'visited_targets', 'found', 'signals',
             'plan_action', 'goal_pose', 'mission_complete',
-            'detected_color', 'reset_odom', 'detection_zone',
+            'detected_color', 'color_area', 'odom_correction', 'detection_zone',
             'distance_left', 'distance_center', 'distance_right',
             'robot_position', 'startup_complete', 'home_position'
         ]
@@ -1048,8 +1133,9 @@ class PlanNode(Node):
         
         #Sensor data from Sense module
         self.bb.set("detected_color", None)
+        self.bb.set("color_area", 0)
         self.bb.set("detection_zone", None)
-        self.bb.set("reset_odom", None)
+        self.bb.set("odom_correction", {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0})
         self.bb.set("distance_left", 999.0)
         self.bb.set("distance_center", 999.0)
         self.bb.set("distance_right", 999.0)
@@ -1106,6 +1192,9 @@ class PlanNode(Node):
             
             #Set detected_color from detection
             self.bb.set("detected_color", det.get('color'))
+            
+            #Set color_area for centering behavior (maximize visible area)
+            self.bb.set("color_area", det.get('bbox_area', 0))
             
             #Set detection_zone for smart avoidance
             self.bb.set("detection_zone", det.get('zone'))
