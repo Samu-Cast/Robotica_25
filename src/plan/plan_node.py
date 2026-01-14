@@ -1111,10 +1111,39 @@ class PlanNode(Node):
         self.cmd_pub = self.create_publisher(String, '/plan/command', 10)
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
         
-        #Timer for BT tick (10 Hz)
-        self.create_timer(0.1, self._tick)
+        # Startup synchronization: wait for robot_description + 5 seconds
+        self._robot_ready = False
+        self._robot_description_received = False
+        self._startup_timer = None
         
-        self.get_logger().info('Plan Node ready')
+        # Subscribe to robot_description to know when robot is spawned
+        self.create_subscription(
+            String, '/robot_description',
+            self._robot_description_cb, 10
+        )
+        
+        self.get_logger().info('Waiting for robot_description topic...')
+    
+    def _robot_description_cb(self, msg):
+        """Callback when robot_description is received."""
+        if not self._robot_description_received:
+            self._robot_description_received = True
+            self.get_logger().info('Robot description received! Waiting 5 seconds for system stabilization...')
+            
+            # Start 5-second countdown timer
+            self._startup_timer = self.create_timer(5.0, self._start_behavior_tree)
+    
+    def _start_behavior_tree(self):
+        """Called after robot_description + 5 seconds delay."""
+        if self._startup_timer:
+            self._startup_timer.cancel()
+            self._startup_timer = None
+        
+        self._robot_ready = True
+        self.get_logger().info('=== Plan Node READY - Starting Behavior Tree ===')
+        
+        # Start the main BT tick timer (10 Hz)
+        self.create_timer(0.1, self._tick)
     
     def _init_blackboard(self):
         """Initialize blackboard with default values."""
@@ -1249,6 +1278,10 @@ class PlanNode(Node):
         Timer callback - tick Behavior Tree and publish outputs.
         Called at 10 Hz (every 0.1 seconds).
         """
+        # Don't tick until robot is ready
+        if not self._robot_ready:
+            return
+        
         self.tree.tick_once()
         
         #Convert internal action to Act command
