@@ -1067,6 +1067,10 @@ class PlanNode(Node):
         super().__init__('plan_node')
         self.get_logger().info('=== Plan Node Starting ===')
         
+        # Simulation readiness flag
+        self.simulation_ready = False
+        self.tick_timer = None
+        
         #Build Behavior Tree
         self.tree = build_tree()
         self.bb = py_trees.blackboard.Client(name="PlanNode")
@@ -1106,10 +1110,45 @@ class PlanNode(Node):
         self.cmd_pub = self.create_publisher(String, '/plan/command', 10)
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
         
-        #Timer for BT tick (10 Hz)
-        self.create_timer(0.1, self._tick)
+        # Wait for simulation to be ready before starting BT tick
+        # Use a timer to poll for /robot_description topic availability
+        self.get_logger().info('Waiting for simulation to be ready (checking /robot_description topic)...')
+        self.create_timer(1.0, self._check_simulation_ready)
+    
+    def _check_simulation_ready(self):
+        """
+        Check if simulation is ready by verifying /robot_description topic exists.
+        Once ready, wait additional time for robot spawn, then start the Behavior Tree tick timer.
+        """
+        if self.simulation_ready:
+            return  # Already ready, nothing to do
         
-        self.get_logger().info('Plan Node ready')
+        # Get list of available topics
+        topic_names_and_types = self.get_topic_names_and_types()
+        topic_names = [name for name, _ in topic_names_and_types]
+        
+        if '/robot_description' in topic_names:
+            self.simulation_ready = True
+            self.get_logger().info('✓ /robot_description topic found!')
+            self.get_logger().info('Waiting 5 seconds for robot to complete spawn...')
+            
+            # Schedule the BT tick timer to start after 5 seconds delay
+            # This gives time for the robot to be fully spawned in Gazebo
+            self.create_timer(5.0, self._start_behavior_tree, callback_group=None)
+        else:
+            self.get_logger().info('Waiting for simulation... /robot_description not yet available')
+    
+    def _start_behavior_tree(self):
+        """
+        Start the Behavior Tree tick timer after spawn delay.
+        Called once after robot is fully ready.
+        """
+        if self.tick_timer is not None:
+            return  # Already started, nothing to do
+        
+        self.get_logger().info('Starting Behavior Tree tick timer (10 Hz)...')
+        self.tick_timer = self.create_timer(0.1, self._tick)
+        self.get_logger().info('Plan Node ready - sending commands to robot')
     
     def _init_blackboard(self):
         """Initialize blackboard with default values."""
