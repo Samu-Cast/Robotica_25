@@ -1,217 +1,58 @@
 """
 Charlie Robot - Plan Module
-Behavior Tree-based decision making for ROS2
+State Machine-based decision making for ROS2
 
-This module implements the strategic decision layer for the Charlie Robot.
-It receives sensor data from Sense module, makes decisions using a Behavior Tree,
-and sends commands to the Act module for physical execution.
+States:
+    INIT - Wait for robot_description + 5s
+    RETREAT - Move backward from spawn platform
+    NAVIGATE - Navigate to current target, avoid obstacles
+    AT_TARGET - Arrived at target, check color
+    GO_HOME - Return to spawn (valve found)
+    DONE - Mission complete
 
 Subscribes to:
-    /sense/proximity/front, front_left, front_right (Range) - ultrasonic distances
-    /sense/odometry (Pose2D) - robot position {x, y, theta}
-    /sense/detection (String JSON) - current detection event
+    /sense/proximity/front, front_left, front_right (Range)
+    /sense/odometry (Pose2D)
+    /sense/detection (String JSON)
+    /sense/battery (Float32)
+    /robot_description (String)
 
 Publishes to:
-    /plan/command - String command for Act (Front, Left, Right, Stop)
-    /plan/signals - JSON array of event signals ["PersonFound", "ValveActivated"]
+    /plan/command - String command for Act (Front, Back, Left, Right, Stop)
+    /plan/signals - JSON array of signals
 """
 
 import json
-import random
 import math
 import time
 
-# ROS2 imports with fallback for testing
-try:
-    import rclpy
-    from rclpy.node import Node
-    from std_msgs.msg import String, Float32
-    from sensor_msgs.msg import Range
-    from geometry_msgs.msg import Pose2D
-    ROS2_AVAILABLE = True
-except ImportError:
-    ROS2_AVAILABLE = False
-    Node = object
-
-#Behavior Tree imports
-import py_trees
-from py_trees import decorators
-from py_trees.composites import Sequence, Selector, Parallel
-from py_trees.common import Status, ParallelPolicy
+# ROS2 imports
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String, Float32
+from sensor_msgs.msg import Range
+from geometry_msgs.msg import Pose2D
 
 
-##########################################################################
-#KNOWN TARGETS CONFIGURATION
-#Define the map locations and their coordinates
-#Robot does NOT know which target is the valve - must check each one
-#theta = robot orientation at arrival (radians, 0 = facing right, π/2 = facing up)
-##########################################################################
+# Known target locations
 KNOWN_TARGETS = {
-    #Color-based targets - robot will visit these and check for valve
     'green': {'x': -3.35, 'y': -5.0, 'theta': -1.65},
     'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
-    'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0}, #This is actually the valve, but robot doesn't know
+    'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0},  # VALVE
 }
 
-#HOME/SPAWN POSITION - Will be saved automatically when robot starts
-#This is just a fallback default if robot_position is not available at startup
-HOME_POSITION_DEFAULT = {
-    'x': 0.0,
-    'y': 0.0,
-    'theta': 0.0
-}
-##########################################################################
 
-
-def calculate_best_direction(distance_left, distance_center, distance_right, threshold=0.5):
-    """
-    Calculate the optimal movement direction based on 3 distance sensors.
+class PlanNode(Node):
+    """Simple State Machine for Charlie Robot navigation."""
     
-    This function implements obstacle avoidance logic by analyzing readings
-    from left, center, and right distance sensors.
+    # States
+    STATE_INIT = 'INIT'
+    STATE_RETREAT = 'RETREAT'
+    STATE_NAVIGATE = 'NAVIGATE'
+    STATE_AT_TARGET = 'AT_TARGET'
+    STATE_GO_HOME = 'GO_HOME'
+    STATE_DONE = 'DONE'
     
-    Args:
-        distance_left: Distance reading from left sensor (meters)
-        distance_center: Distance reading from center sensor (meters)  
-        distance_right: Distance reading from right sensor (meters)
-        threshold: Minimum safe distance to consider path clear (default 0.5m)
-    
-    Returns:
-        str: One of 'MOVE_FORWARD', 'TURN_LEFT', 'TURN_RIGHT', or 'AVOID_OBSTACLE'
-    """
-    #If center is clear, move forward
-    if distance_center > threshold:
-        return 'MOVE_FORWARD'
-    
-    #Center blocked - choose direction with more space
-    if distance_left > threshold and distance_left >= distance_right:
-        return 'TURN_LEFT'
-    elif distance_right > threshold:
-        return 'TURN_RIGHT'
-    else:
-        #All sensors blocked - generic obstacle avoidance
-        return 'AVOID_OBSTACLE'
-
-
-def calculate_closest_target(robot_pos, visited_targets):
-    """
-    Find the closest unvisited target from KNOWN_TARGETS.
-    
-    Args:
-        robot_pos: Dict with robot position {'x': float, 'y': float, 'theta': float}
-        visited_targets: List of already visited target names
-    
-    Returns:
-        Dict with target info {'name', 'x', 'y', 'theta', 'distance'} or None if all visited
-    """
-    robot_x = robot_pos.get('x', 0.0)
-    robot_y = robot_pos.get('y', 0.0)
-    
-    closest = None
-    min_distance = float('inf')
-    
-    #Only consider unique positions
-    seen_positions = set()
-    
-    for target_name, target_data in KNOWN_TARGETS.items():
-        #Skip visited targets
-        if target_name in visited_targets:
-            continue
-        
-        #Skip duplicate positions 
-        pos_key = (target_data['x'], target_data['y'])
-        if pos_key in seen_positions:
-            continue
-        seen_positions.add(pos_key)
-        
-        #Calculate Euclidean distance
-        dx = target_data['x'] - robot_x
-        dy = target_data['y'] - robot_y
-        distance = math.sqrt(dx**2 + dy**2)
-        
-        if distance < min_distance:
-            min_distance = distance
-            closest = {
-                'name': target_name,
-                'x': target_data['x'],
-                'y': target_data['y'],
-                'theta': target_data['theta'],
-                'distance': distance
-            }
-    
-    return closest
-
-
-def calculate_direction_to_target(robot_pos, target):
-    """
-    Calculate the steering direction to reach target.
-    
-    Args:
-        robot_pos: Dict {'x', 'y', 'theta'} - current robot position and orientation
-        target: Dict {'x', 'y'} - target position
-    
-    Returns:
-        str: 'MOVE_FORWARD', 'TURN_LEFT', or 'TURN_RIGHT'
-    """
-    robot_x = robot_pos.get('x', 0.0)
-    robot_y = robot_pos.get('y', 0.0)
-    robot_theta = robot_pos.get('theta', 0.0)
-    
-    #Calculate angle to target
-    dx = target['x'] - robot_x
-    dy = target['y'] - robot_y
-    target_angle = math.atan2(dy, dx)
-    
-    #Calculate angle difference (normalize to -π to π)
-    angle_diff = target_angle - robot_theta
-    while angle_diff > math.pi:
-        angle_diff -= 2 * math.pi
-    while angle_diff < -math.pi:
-        angle_diff += 2 * math.pi
-    
-    #Decide action based on angle difference
-    # Tolerance increased to prevent jitter (Hysteresis)
-    angle_threshold = 0.2  # ~11 degrees
-    
-    if abs(angle_diff) < angle_threshold:
-        return 'MOVE_FORWARD'
-    elif angle_diff > 0:
-        return 'MOVE_FRONT_LEFT'
-    else:
-        return 'MOVE_FRONT_RIGHT'
-
-
-def check_wall_alignment(distance_left, distance_right, threshold=0.05):
-    """
-    Check if robot is aligned with wall (facing straight).
-    
-    When left and right sensors read approximately the same distance,
-    the robot is perpendicular to the wall.
-    
-    Args:
-        distance_left: Left sensor reading (meters)
-        distance_right: Right sensor reading (meters)
-        threshold: Maximum allowed difference (default 0.05m = 5cm)
-    
-    Returns:
-        bool: True if aligned, False otherwise
-    """
-    if distance_left is None or distance_right is None:
-        return False
-    
-    diff = abs(distance_left - distance_right)
-    return diff <= threshold
-
-
-
-#BEHAVIOR TREE NODES
-#Battery Management
-
-class BatteryCheck(py_trees.behaviour.Behaviour):
-    """
-    Check if battery level is sufficient for operation.
-    Returns SUCCESS if battery > 20%, FAILURE otherwise.
-    """
     def __init__(self):
         super().__init__(name="BatteryCheck")
         self.bb = self.attach_blackboard_client(name=self.name)
@@ -674,8 +515,8 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         target_angle = math.atan2(dy, dx)
+        angle_diff = target_angle - self.robot_position['theta']
         
-        angle_diff = target_angle - robot_theta
         while angle_diff > math.pi:
             angle_diff -= 2 * math.pi
         while angle_diff < -math.pi:
@@ -1302,22 +1143,16 @@ class PlanNode(Node):
 
 #entry point
 def main(args=None):
-    """Main entry point for Plan Node."""
-    if not ROS2_AVAILABLE:
-        print("ERROR: ROS2 not available. Install rclpy to run this node.")
-        return
-    
     rclpy.init(args=args)
     node = PlanNode()
     
     try:
         rclpy.spin(node)
-    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+    except KeyboardInterrupt:
         pass
     finally:
         node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':
