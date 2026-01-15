@@ -1128,13 +1128,13 @@ class PlanNode(Node):
         """Callback when robot_description is received."""
         if not self._robot_description_received:
             self._robot_description_received = True
-            self.get_logger().info('Robot description received! Waiting 5 seconds for system stabilization...')
+            self.get_logger().info('Robot description received! Waiting 10 seconds for system stabilization...')
             
-            # Start 5-second countdown timer
-            self._startup_timer = self.create_timer(5.0, self._start_behavior_tree)
+            # Start 10-second countdown timer
+            self._startup_timer = self.create_timer(10.0, self._start_behavior_tree)
     
     def _start_behavior_tree(self):
-        """Called after robot_description + 5 seconds delay."""
+        """Called after robot_description + 10 seconds delay."""
         if self._startup_timer:
             self._startup_timer.cancel()
             self._startup_timer = None
