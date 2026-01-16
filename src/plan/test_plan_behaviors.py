@@ -36,13 +36,15 @@ class TestPlanBehaviors:
         py_trees.blackboard.Blackboard.clear()
         self.bb = py_trees.blackboard.Client(name="TestClient")
         
-        # Registra tutte le chiavi necessarie
+        # Registra tutte le chiavi necessarie (complete set from plan_node.py)
         keys = [
             'battery', 'obstacles', 'detections', 'room_color', 'home_color',
             'current_target', 'visited_targets', 'found', 'signals', 
             'plan_action', 'goal_pose', 'mission_complete', 'detected_color',
             'reset_odom', 'distance_left', 'distance_center', 'distance_right',
-            'robot_position'
+            'robot_position', 'detection_zone', 'color_area', 'odom_correction',
+            'home_position', 'startup_complete', 'targets',
+            'detection_distance', 'detection_confidence'
         ]
         for key in keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
@@ -55,6 +57,15 @@ class TestPlanBehaviors:
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
         self.bb.set("visited_targets", [])
         self.bb.set("reset_odom", None)
+        self.bb.set("detection_zone", None)
+        self.bb.set("color_area", 0)
+        self.bb.set("odom_correction", {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0})
+        self.bb.set("home_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
+        self.bb.set("startup_complete", True)  # Skip initial retreat in tests
+        self.bb.set("current_target", None)
+        self.bb.set("found", None)
+        self.bb.set("detection_distance", 999.0)
+        self.bb.set("detection_confidence", 0.0)
     
     def teardown_method(self):
         """Cleanup dopo ogni test"""
@@ -209,26 +220,33 @@ class TestPlanBehaviors:
         print("✓ Ritorna FAILURE quando tutti i target sono visitati")
     
     def test_at_target_correct_color(self):
-        """Test AtTarget - wall alignment and valve check (red = valve)"""
+        """Test AtTarget - fully aligned with red valve detection"""
         print("\n[TEST] AtTarget - Aligned and red = valve")
         
-        # Setup - robot near wall, aligned (left == right), red color = valve
-        target = {'name': 'red', 'x': 10.0, 'y': 15.0, 'theta': 0.0}
+        # Setup - robot at target position, fully aligned, red color = valve
+        target = {'name': 'red', 'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.bb.set("current_target", target)
         self.bb.set("detected_color", "red")  # Red color = valve!
-        self.bb.set("distance_center", 0.5)   # Near wall
-        self.bb.set("distance_left", 0.6)     # Aligned
-        self.bb.set("distance_right", 0.6)    # Aligned
+        self.bb.set("detection_zone", "center")  # Target centered in camera
+        self.bb.set("distance_center", 0.35)   # At target distance
+        self.bb.set("distance_left", 0.40)     # Aligned (diff < 0.05)
+        self.bb.set("distance_right", 0.40)    # Aligned (diff < 0.05)
         self.bb.set("visited_targets", [])
         behavior = AtTarget()
         behavior.setup_with_descendants()
         
-        # Execute
-        status = behavior.update()
+        # Need multiple ticks to go through all alignment phases
+        # Phase 1: Visual centering (detection_zone=center -> skip)
+        # Phase 2: Sensor alignment (already aligned -> skip)
+        # Phase 3: Final approach (already at 0.35m -> skip)
+        # Phase 4: Complete
+        for _ in range(4):
+            status = behavior.update()
+            if status == Status.SUCCESS:
+                break
         
         # Verify
         visited = self.bb.get("visited_targets")
-        reset_odom = self.bb.get("reset_odom")
         found = self.bb.get("found")
         
         assert status == Status.SUCCESS, f"Expected SUCCESS, got {status}"
@@ -239,28 +257,29 @@ class TestPlanBehaviors:
         print(f"✓ Found: {found}")
     
     def test_at_target_not_aligned(self):
-        """Test AtTarget - robot not aligned with wall"""
-        print("\n[TEST] AtTarget - Non allineato")
+        """Test AtTarget - robot needs visual centering (target on left)"""
+        print("\n[TEST] AtTarget - Non allineato (target a sinistra)")
         
-        # Setup - robot near wall but not aligned
-        target = {'name': 'green', 'x': 2.0, 'y': 3.0, 'theta': 0.0}
+        # Setup - robot at target position but target not centered in camera
+        target = {'name': 'green', 'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.bb.set("current_target", target)
-        self.bb.set("distance_center", 0.5)  # Near wall
-        self.bb.set("distance_left", 0.3)    # Not aligned
-        self.bb.set("distance_right", 0.8)   # Not aligned
+        self.bb.set("detection_zone", "left")  # Target not centered
+        self.bb.set("distance_center", 0.5)
+        self.bb.set("distance_left", 0.3)
+        self.bb.set("distance_right", 0.8)
         self.bb.set("visited_targets", [])
         behavior = AtTarget()
         behavior.setup_with_descendants()
         
-        # Execute
+        # Execute (first tick should be Phase 1: visual centering)
         status = behavior.update()
         
-        # Verify - should return RUNNING while aligning
+        # Verify - should return RUNNING while centering
         action = self.bb.get("plan_action")
         assert status == Status.RUNNING, f"Expected RUNNING, got {status}"
-        assert action in ["TURN_LEFT", "TURN_RIGHT"], f"Expected turn action, got {action}"
+        assert action == "TURN_LEFT", f"Expected TURN_LEFT (target on left), got {action}"
         
-        print(f"✓ Robot si sta allineando: {action}")
+        print(f"✓ Robot si sta centrando visivamente: {action}")
     
     def test_move_to_target(self):
         """Test MoveToTarget - calculates closest target"""

@@ -342,16 +342,23 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
 
 class AtTarget(py_trees.behaviour.Behaviour):
     """
-    Check if robot has arrived at the SPECIFIC target coordinates.
+    Check if robot has arrived at the target and perform precise alignment.
     
-    Logic:
-    1. Calculate distance to target using odometry (with correction)
-    2. If close enough (< ARRIVAL_THRESHOLD), proceed to alignment
-    3. Align with wall using sensors (left == right)
-    4. Check color and mark visited
+    Uses BOTH visual detection (from Sense module) AND proximity sensors:
+    
+    4-Phase Alignment Algorithm:
+    1. VISUAL CENTERING: Use detection_zone to center target in camera view
+    2. SENSOR ALIGNMENT: Equalize distance_left ≈ distance_right (perpendicular to target)
+    3. FINAL APPROACH: Adjust distance_center to TARGET_ALIGNMENT_DISTANCE
+    4. ODOMETRY RESET: Update odom_correction with known target coordinates
     """
-    # Threshold to consider "arrived" at target (meters)
+    # Threshold to consider "arrived" at target (meters) - triggers alignment
     ARRIVAL_THRESHOLD = 1.0
+    
+    # Alignment parameters
+    TARGET_ALIGNMENT_DISTANCE = 0.35  # Target distance from center sensor (meters)
+    LATERAL_ALIGNMENT_THRESHOLD = 0.05  # Max diff between left/right sensors (meters)
+    DISTANCE_TOLERANCE = 0.03  # ±tolerance for final distance (meters)
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -366,6 +373,12 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("found", access=py_trees.common.Access.WRITE)
+        # New keys for visual detection
+        self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
+        self.bb.register_key("color_area", access=py_trees.common.Access.READ)
+        
+        # Internal state for alignment phases
+        self._alignment_phase = 0  # 0=not started, 1=centering, 2=sensor align, 3=distance, 4=done
 
     def update(self):
         target = self.bb.get("current_target")
@@ -384,63 +397,119 @@ class AtTarget(py_trees.behaviour.Behaviour):
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
-        # Step 1: Check if we're close to the TARGET position
+        # Check if we're close enough to start alignment
         if distance_to_target > self.ARRIVAL_THRESHOLD:
             # Not at target yet - let MoveToTarget continue navigating
+            self._alignment_phase = 0
             return Status.FAILURE
         
-        # Read distance sensors
-        dist_left = self.bb.get("distance_left")
-        dist_right = self.bb.get("distance_right")
-        dist_center = self.bb.get("distance_center")
-        
-        print(f"[DEBUG][AtTarget] Vicino al target {target['name'].upper()}! Distanza: {distance_to_target:.2f}m")
-        
-        # Step 2: Check if we need to approach the wall more
-        near_wall_threshold = 0.6  # Get closer to the wall
-        if dist_center is None or dist_center > near_wall_threshold:
-            # Keep moving forward to get closer
-            self.bb.set("plan_action", "MOVE_FORWARD")
-            print(f"[DEBUG][AtTarget] Avvicinamento al muro... dist_center: {dist_center:.2f}m")
-            return Status.RUNNING
-        
-        # Step 3: Align with wall (left == right distance)
-        if not check_wall_alignment(dist_left, dist_right, threshold=0.08):
-            if dist_left is not None and dist_right is not None:
-                if dist_left > dist_right:
-                    self.bb.set("plan_action", "TURN_LEFT")
-                else:
-                    self.bb.set("plan_action", "TURN_RIGHT")
-                print(f"[DEBUG][AtTarget] Allineamento... L={dist_left:.2f}m R={dist_right:.2f}m")
-            return Status.RUNNING
-        
-        # Step 4: Aligned! Stop and process
-        self.bb.set("plan_action", "STOP")
-        
+        # Read sensors and detection info
+        dist_left = self.bb.get("distance_left") or 999.0
+        dist_right = self.bb.get("distance_right") or 999.0
+        dist_center = self.bb.get("distance_center") or 999.0
+        detection_zone = self.bb.get("detection_zone")
+        color_area = self.bb.get("color_area") or 0
         detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
         
-        print(f"[DEBUG][AtTarget] ARRIVATO al target {target_name.upper()}! Colore: {detected_color or 'nessuno'}")
+        # Start alignment sequence
+        if self._alignment_phase == 0:
+            self._alignment_phase = 1
+            print(f"[DEBUG][AtTarget] === INIZIO ALLINEAMENTO al target {target_name.upper()} ===")
+            print(f"[DEBUG][AtTarget] Distanza odometrica: {distance_to_target:.2f}m")
         
-        # Calculate odometry correction offset (update with this position)
+        # =====================================================================
+        # PHASE 1: VISUAL CENTERING - Use camera detection_zone
+        # =====================================================================
+        if self._alignment_phase == 1:
+            if detection_zone == 'left':
+                self.bb.set("plan_action", "TURN_LEFT")
+                print(f"[DEBUG][AtTarget] FASE 1 - Centratura: target a SINISTRA → giro a sinistra")
+                return Status.RUNNING
+            elif detection_zone == 'right':
+                self.bb.set("plan_action", "TURN_RIGHT")
+                print(f"[DEBUG][AtTarget] FASE 1 - Centratura: target a DESTRA → giro a destra")
+                return Status.RUNNING
+            elif detection_zone == 'center':
+                print(f"[DEBUG][AtTarget] FASE 1 - Target CENTRATO! Area: {color_area}px²")
+                self._alignment_phase = 2
+            else:
+                # No detection - use sensor-based alignment as fallback
+                print(f"[DEBUG][AtTarget] FASE 1 - Nessuna detection visiva, passo a sensori")
+                self._alignment_phase = 2
+        
+        # =====================================================================
+        # PHASE 2: SENSOR ALIGNMENT - Equalize left and right distances
+        # =====================================================================
+        if self._alignment_phase == 2:
+            lateral_diff = abs(dist_left - dist_right)
+            
+            if lateral_diff > self.LATERAL_ALIGNMENT_THRESHOLD:
+                if dist_left > dist_right:
+                    self.bb.set("plan_action", "TURN_LEFT")
+                    print(f"[DEBUG][AtTarget] FASE 2 - Allineamento sensori: L={dist_left:.2f}m R={dist_right:.2f}m → giro a sinistra")
+                else:
+                    self.bb.set("plan_action", "TURN_RIGHT")
+                    print(f"[DEBUG][AtTarget] FASE 2 - Allineamento sensori: L={dist_left:.2f}m R={dist_right:.2f}m → giro a destra")
+                return Status.RUNNING
+            else:
+                print(f"[DEBUG][AtTarget] FASE 2 - Sensori ALLINEATI! L={dist_left:.2f}m R={dist_right:.2f}m (diff={lateral_diff:.3f}m)")
+                self._alignment_phase = 3
+        
+        # =====================================================================
+        # PHASE 3: FINAL APPROACH - Adjust center distance
+        # =====================================================================
+        if self._alignment_phase == 3:
+            distance_error = dist_center - self.TARGET_ALIGNMENT_DISTANCE
+            
+            if abs(distance_error) > self.DISTANCE_TOLERANCE:
+                if distance_error > 0:
+                    # Too far - move forward
+                    self.bb.set("plan_action", "MOVE_FORWARD")
+                    print(f"[DEBUG][AtTarget] FASE 3 - Approccio: dist_center={dist_center:.2f}m (target={self.TARGET_ALIGNMENT_DISTANCE}m) → avanzo")
+                else:
+                    # Too close - move backward
+                    self.bb.set("plan_action", "MOVE_BACKWARD")
+                    print(f"[DEBUG][AtTarget] FASE 3 - Approccio: dist_center={dist_center:.2f}m (target={self.TARGET_ALIGNMENT_DISTANCE}m) → arretro")
+                return Status.RUNNING
+            else:
+                print(f"[DEBUG][AtTarget] FASE 3 - Distanza CORRETTA! dist_center={dist_center:.2f}m")
+                self._alignment_phase = 4
+        
+        # =====================================================================
+        # PHASE 4: ALIGNMENT COMPLETE - Reset odometry and finalize
+        # =====================================================================
+        self.bb.set("plan_action", "STOP")
+        
+        print(f"[DEBUG][AtTarget] === ALLINEAMENTO COMPLETATO ===")
+        print(f"[DEBUG][AtTarget] Target: {target_name.upper()} | Colore: {detected_color or 'nessuno'}")
+        print(f"[DEBUG][AtTarget] Sensori finali: L={dist_left:.2f}m C={dist_center:.2f}m R={dist_right:.2f}m")
+        
+        # Calculate and apply odometry correction (reset with known coordinates)
         new_correction = {
             'dx': target['x'] - robot_pos_raw.get('x', 0.0),
             'dy': target['y'] - robot_pos_raw.get('y', 0.0),
             'dtheta': target['theta'] - robot_pos_raw.get('theta', 0.0)
         }
         self.bb.set("odom_correction", new_correction)
-        print(f"[DEBUG][AtTarget] Correzione odometria aggiornata: dx={new_correction['dx']:.2f}m, dy={new_correction['dy']:.2f}m")
+        print(f"[DEBUG][AtTarget] ODOMETRIA RESETTATA con coordinate target:")
+        print(f"[DEBUG][AtTarget]   dx={new_correction['dx']:.2f}m, dy={new_correction['dy']:.2f}m, dθ={math.degrees(new_correction['dtheta']):.1f}°")
         
         # Mark target as visited
         visited = self.bb.get("visited_targets") or []
         if target_name not in visited:
             visited.append(target_name)
             self.bb.set("visited_targets", visited)
-            print(f"[DEBUG][AtTarget] Target {target_name.upper()} marcato come visitato!")
+            print(f"[DEBUG][AtTarget] Target {target_name.upper()} marcato come VISITATO!")
         
-        # Step 5: Check if this is the valve (red color)
+        # Reset alignment phase for next target
+        self._alignment_phase = 0
+        
+        # Check if this is the valve (red color)
         if detected_color == "red":
-            print(f"[DEBUG][AtTarget] === VALVOLA TROVATA! ===")
+            print(f"[DEBUG][AtTarget] ════════════════════════════════════")
+            print(f"[DEBUG][AtTarget] ═══ VALVOLA TROVATA! MISSIONE OK ═══")
+            print(f"[DEBUG][AtTarget] ════════════════════════════════════")
             self.bb.set("found", "valve")
             return Status.SUCCESS
         
