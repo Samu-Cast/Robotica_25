@@ -49,7 +49,7 @@ from py_trees.common import Status, ParallelPolicy
 KNOWN_TARGETS = {
     #Color-based targets - robot will visit these and check for valve
     'green': {'x': -3.35, 'y': -5.0, 'theta': -1.65},
-    'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
+    'blue': {'x': 0.25, 'y': -4.0, 'theta': 0.0},
     'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0}, #This is actually the valve, but robot doesn't know
 }
 
@@ -346,14 +346,19 @@ class AtTarget(py_trees.behaviour.Behaviour):
     
     Uses BOTH visual detection (from Sense module) AND proximity sensors:
     
-    4-Phase Alignment Algorithm:
+    5-Phase Alignment Algorithm:
+    0. INITIAL APPROACH: Move forward until proximity sensor detects target (~0.6m)
     1. VISUAL CENTERING: Use detection_zone to center target in camera view
     2. SENSOR ALIGNMENT: Equalize distance_left ≈ distance_right (perpendicular to target)
     3. FINAL APPROACH: Adjust distance_center to TARGET_ALIGNMENT_DISTANCE
     4. ODOMETRY RESET: Update odom_correction with known target coordinates
     """
-    # Threshold to consider "arrived" at target (meters) - triggers alignment
-    ARRIVAL_THRESHOLD = 1.0
+    # Threshold to consider robot near target based on odometry (meters)
+    # Robot must be within this distance for alignment to begin
+    ARRIVAL_THRESHOLD = 0.5
+    
+    # Initial approach: move forward until this distance from wall
+    INITIAL_APPROACH_DISTANCE = 0.6  # meters - triggers fine alignment
     
     # Alignment parameters
     TARGET_ALIGNMENT_DISTANCE = 0.35  # Target distance from center sensor (meters)
@@ -378,7 +383,8 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("color_area", access=py_trees.common.Access.READ)
         
         # Internal state for alignment phases
-        self._alignment_phase = 0  # 0=not started, 1=centering, 2=sensor align, 3=distance, 4=done
+        # 0=initial approach, 1=centering, 2=sensor align, 3=final distance, 4=done
+        self._alignment_phase = -1  # -1 = not started
 
     def update(self):
         target = self.bb.get("current_target")
@@ -392,15 +398,15 @@ class AtTarget(py_trees.behaviour.Behaviour):
         robot_x = robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0)
         robot_y = robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0)
         
-        # Calculate distance to TARGET coordinates
+        # Calculate distance to TARGET coordinates (based on known map position)
         dx = target['x'] - robot_x
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
-        # Check if we're close enough to start alignment
+        # Check if we're close enough to start alignment (based on odometry/known position)
         if distance_to_target > self.ARRIVAL_THRESHOLD:
             # Not at target yet - let MoveToTarget continue navigating
-            self._alignment_phase = 0
+            self._alignment_phase = -1
             return Status.FAILURE
         
         # Read sensors and detection info
@@ -413,10 +419,58 @@ class AtTarget(py_trees.behaviour.Behaviour):
         target_name = target.get("name")
         
         # Start alignment sequence
-        if self._alignment_phase == 0:
-            self._alignment_phase = 1
+        if self._alignment_phase == -1:
+            self._alignment_phase = 0
             print(f"[DEBUG][AtTarget] === INIZIO ALLINEAMENTO al target {target_name.upper()} ===")
-            print(f"[DEBUG][AtTarget] Distanza odometrica: {distance_to_target:.2f}m")
+            print(f"[DEBUG][AtTarget] Distanza odometrica: {distance_to_target:.2f}m | Sensore centrale: {dist_center:.2f}m")
+        
+        # =====================================================================
+        # PHASE 0: ROTATE TOWARDS TARGET then APPROACH
+        # Uses known coordinates to calculate angle, not sensors
+        # =====================================================================
+        if self._alignment_phase == 0:
+            # Calculate angle TO the target from robot's current position
+            robot_theta = robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+            angle_to_target = math.atan2(dy, dx)  # Angle from robot to target
+            
+            # Calculate angle error (how much we need to turn)
+            angle_error = angle_to_target - robot_theta
+            # Normalize to [-π, π]
+            while angle_error > math.pi:
+                angle_error -= 2 * math.pi
+            while angle_error < -math.pi:
+                angle_error += 2 * math.pi
+            
+            ANGLE_THRESHOLD = 0.15  # ~8.5 degrees tolerance
+            
+            # First: rotate to face the target (only if not super close to avoid jitter)
+            # When very close (< 0.2m), atan2 becomes unstable due to noise
+            if distance_to_target > 0.2 and abs(angle_error) > ANGLE_THRESHOLD:
+                if angle_error > 0:
+                    self.bb.set("plan_action", "TURN_LEFT")
+                    print(f"[DEBUG][AtTarget] FASE 0 - Rotazione verso target: errore={math.degrees(angle_error):.1f}° → TURN_LEFT")
+                else:
+                    self.bb.set("plan_action", "TURN_RIGHT")
+                    print(f"[DEBUG][AtTarget] FASE 0 - Rotazione verso target: errore={math.degrees(angle_error):.1f}° → TURN_RIGHT")
+                return Status.RUNNING
+            
+            # Then: move forward until close to wall OR sensors detect something
+            # Check all sensors for proximity to avoid getting stuck if center misses
+            # Also check odometry distance as fallback
+            any_sensor_close = (dist_center < self.INITIAL_APPROACH_DISTANCE or 
+                              dist_left < 0.5 or 
+                              dist_right < 0.5)
+            
+            odom_very_close = distance_to_target < 0.15
+            
+            if not any_sensor_close and not odom_very_close:
+                self.bb.set("plan_action", "MOVE_FORWARD")
+                print(f"[DEBUG][AtTarget] FASE 0 - Avanzo: dist_center={dist_center:.2f}m (L={dist_left:.2f} R={dist_right:.2f}) → FORWARD")
+                return Status.RUNNING
+            else:
+                reason = "Sensori" if any_sensor_close else "Odometria"
+                print(f"[DEBUG][AtTarget] FASE 0 - Completata ({reason})! C={dist_center:.2f} L={dist_left:.2f} R={dist_right:.2f} Odom={distance_to_target:.2f} → Passo a F1")
+                self._alignment_phase = 1
         
         # =====================================================================
         # PHASE 1: VISUAL CENTERING - Use camera detection_zone
@@ -503,7 +557,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
             print(f"[DEBUG][AtTarget] Target {target_name.upper()} marcato come VISITATO!")
         
         # Reset alignment phase for next target
-        self._alignment_phase = 0
+        self._alignment_phase = -1
         
         # Check if this is the valve (red color)
         if detected_color == "red":
@@ -637,8 +691,11 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
         }
         
-        # Thresholds
-        OBSTACLE_DIST = 0.5
+        # Thresholds - different for front vs lateral sensors
+        # Front: allows closer approach to targets
+        # Lateral: tighter clearance to avoid scraping walls
+        OBSTACLE_DIST_FRONT = 0.35   # meters - front sensor threshold (reduced to allow closer approach)
+        OBSTACLE_DIST_LATERAL = 0.25  # meters - lateral sensors threshold (tighter clearance)
         
         # --- LOGIC START ---
         
@@ -678,19 +735,22 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             self._debug_tick += 1
             return Status.RUNNING
         
-        # B. ULTRASONIC OBSTACLE DETECTION
-        is_blocked = (d_center < OBSTACLE_DIST or d_left < OBSTACLE_DIST or d_right < OBSTACLE_DIST)
+        # B. ULTRASONIC OBSTACLE DETECTION (different thresholds for front vs lateral)
+        front_blocked = d_center < OBSTACLE_DIST_FRONT
+        left_blocked = d_left < OBSTACLE_DIST_LATERAL
+        right_blocked = d_right < OBSTACLE_DIST_LATERAL
+        is_blocked = front_blocked or left_blocked or right_blocked
         
         if is_blocked:
             # DEBUG: Log ostacolo rilevato
             if not self.avoiding:
-                print(f"[DEBUG][MoveToTarget] OSTACOLO RILEVATO! Distanze: L={d_left:.2f}m C={d_center:.2f}m R={d_right:.2f}m")
+                print(f"[DEBUG][MoveToTarget] OSTACOLO! L={d_left:.2f}m(<{OBSTACLE_DIST_LATERAL}) C={d_center:.2f}m(<{OBSTACLE_DIST_FRONT}) R={d_right:.2f}m(<{OBSTACLE_DIST_LATERAL})")
             
             self.avoiding = True
             self.recovery_steps = 0 # Reset recovery
             
-            # Escape Logic
-            if d_left < OBSTACLE_DIST and d_center < OBSTACLE_DIST and d_right < OBSTACLE_DIST:
+            # Escape Logic - use lateral thresholds for trapped check
+            if left_blocked and front_blocked and right_blocked:
                  action = "TURN_RIGHT" # Trapped -> Spin
                  if self._debug_tick % 10 == 0:
                      print(f"[DEBUG][MoveToTarget] INTRAPPOLATO! Rotazione a destra...")
@@ -1180,7 +1240,7 @@ class PlanNode(Node):
         self.cmd_pub = self.create_publisher(String, '/plan/command', 10)
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
         
-        # Startup synchronization: wait for robot_description + 5 seconds
+        # Startup synchronization: wait for robot_description + 10 seconds
         self._robot_ready = False
         self._robot_description_received = False
         self._startup_timer = None
