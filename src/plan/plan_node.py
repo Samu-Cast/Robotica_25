@@ -26,6 +26,7 @@ try:
     import rclpy
     from rclpy.node import Node
     from std_msgs.msg import String, Float32
+    from rosgraph_msgs.msg import Clock
     from sensor_msgs.msg import Range
     from geometry_msgs.msg import Pose2D
     ROS2_AVAILABLE = True
@@ -1240,30 +1241,28 @@ class PlanNode(Node):
         self.cmd_pub = self.create_publisher(String, '/plan/command', 10)
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
         
-        # Startup synchronization: wait for robot_description + 10 seconds
+        # Startup synchronization: wait for /clock topic (simulation running)
         self._robot_ready = False
-        self._robot_description_received = False
         self._startup_timer = None
         
-        # Subscribe to robot_description to know when robot is spawned
+        # Subscribe to /clock to know when simulation is running
         self.create_subscription(
-            String, '/robot_description',
-            self._robot_description_cb, 10
+            Clock, '/clock',
+            self._clock_cb, 10
         )
         
-        self.get_logger().info('Waiting for robot_description topic...')
+        self.get_logger().info('Waiting for simulation clock...')
     
-    def _robot_description_cb(self, msg):
-        """Callback when robot_description is received."""
-        if not self._robot_description_received:
-            self._robot_description_received = True
-            self.get_logger().info('Robot description received! Waiting 10 seconds for system stabilization...')
-            
-            # Start 10-second countdown timer
-            self._startup_timer = self.create_timer(10.0, self._start_behavior_tree)
+    def _clock_cb(self, msg):
+        """Callback for /clock topic. Starts BT after simulation time > 0."""
+        if not self._robot_ready and self._startup_timer is None:
+            # Check if simulation has started (time > 0)
+            if msg.clock.sec > 0 or msg.clock.nanosec > 0:
+                self.get_logger().info(f'Simulation started (time={msg.clock.sec}s)! Waiting 10s for stabilization...')
+                self._startup_timer = self.create_timer(10.0, self._start_behavior_tree)
     
     def _start_behavior_tree(self):
-        """Called after robot_description + 10 seconds delay."""
+        """Called after clock detected + 10 seconds delay."""
         if self._startup_timer:
             self._startup_timer.cancel()
             self._startup_timer = None
