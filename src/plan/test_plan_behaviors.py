@@ -20,7 +20,7 @@ import py_trees
 from py_trees.common import Status
 
 # Import dei behavior da testare
-from plan_node import (
+from behaviors import (
     BatteryCheck, GoCharge, CalculateTarget, AtTarget, MoveToTarget,
     SearchObj, RecognitionPerson, RecognitionObstacle, RecognitionValve,
     SignalPerson, GoAroundP, GoAroundO, ActiveValve, GoHome,
@@ -36,13 +36,15 @@ class TestPlanBehaviors:
         py_trees.blackboard.Blackboard.clear()
         self.bb = py_trees.blackboard.Client(name="TestClient")
         
-        # Registra tutte le chiavi necessarie
+        # Registra tutte le chiavi necessarie (aggiornato per nuovo behaviors.py)
         keys = [
             'battery', 'obstacles', 'detections', 'room_color', 'home_color',
             'current_target', 'visited_targets', 'found', 'signals', 
             'plan_action', 'goal_pose', 'mission_complete', 'detected_color',
             'reset_odom', 'distance_left', 'distance_center', 'distance_right',
-            'robot_position'
+            'robot_position', 'home_position', 'odom_correction', 'startup_complete',
+            'detection_zone', 'detection_distance', 'detection_confidence',
+            'color_area'
         ]
         for key in keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
@@ -55,6 +57,17 @@ class TestPlanBehaviors:
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
         self.bb.set("visited_targets", [])
         self.bb.set("reset_odom", None)
+        self.bb.set("home_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
+        self.bb.set("odom_correction", {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0})
+        self.bb.set("current_target", None)
+        self.bb.set("startup_complete", True)  # Skip InitialRetreat in tests
+        self.bb.set("detection_zone", None)
+        self.bb.set("detection_distance", 999.0)
+        self.bb.set("detection_confidence", 0.0)
+        self.bb.set("battery", 100.0)
+        self.bb.set("signals", [])
+        self.bb.set("found", None)
+        self.bb.set("mission_complete", False)
     
     def teardown_method(self):
         """Cleanup dopo ogni test"""
@@ -115,7 +128,8 @@ class TestPlanBehaviors:
         action = self.bb.get("plan_action")
         
         assert new_battery > 15.0, "Batteria dovrebbe aumentare"
-        assert goal_pose == {'x': 0.0, 'y': 0.0, 'theta': 3.14159}, "Goal pose errato"
+        # home_position is set to (0,0,0) in setup_method
+        assert goal_pose == {'x': 0.0, 'y': 0.0, 'theta': 0.0}, "Goal pose errato"
         # Con sensori a 999.0 (tutti liberi), dovrebbe andare dritto
         assert action == "MOVE_FORWARD", f"Expected MOVE_FORWARD, got {action}"
         print(f"✓ Batteria ricaricata da 15% a {new_battery}%")
@@ -212,9 +226,11 @@ class TestPlanBehaviors:
         """Test AtTarget - wall alignment and valve check (red = valve)"""
         print("\n[TEST] AtTarget - Aligned and red = valve")
         
-        # Setup - robot near wall, aligned (left == right), red color = valve
-        target = {'name': 'red', 'x': 10.0, 'y': 15.0, 'theta': 0.0}
+        # Setup - robot NEAR target coordinates, aligned, red color = valve
+        # AtTarget checks distance to target first, then wall alignment
+        target = {'name': 'red', 'x': 0.5, 'y': 0.5, 'theta': 0.0}
         self.bb.set("current_target", target)
+        self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})  # Within ARRIVAL_THRESHOLD
         self.bb.set("detected_color", "red")  # Red color = valve!
         self.bb.set("distance_center", 0.5)   # Near wall
         self.bb.set("distance_left", 0.6)     # Aligned
@@ -228,7 +244,6 @@ class TestPlanBehaviors:
         
         # Verify
         visited = self.bb.get("visited_targets")
-        reset_odom = self.bb.get("reset_odom")
         found = self.bb.get("found")
         
         assert status == Status.SUCCESS, f"Expected SUCCESS, got {status}"
@@ -242,13 +257,15 @@ class TestPlanBehaviors:
         """Test AtTarget - robot not aligned with wall"""
         print("\n[TEST] AtTarget - Non allineato")
         
-        # Setup - robot near wall but not aligned
-        target = {'name': 'green', 'x': 2.0, 'y': 3.0, 'theta': 0.0}
+        # Setup - robot NEAR target but not aligned with wall
+        target = {'name': 'green', 'x': 0.5, 'y': 0.5, 'theta': 0.0}
         self.bb.set("current_target", target)
+        self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})  # Within ARRIVAL_THRESHOLD
         self.bb.set("distance_center", 0.5)  # Near wall
         self.bb.set("distance_left", 0.3)    # Not aligned
         self.bb.set("distance_right", 0.8)   # Not aligned
         self.bb.set("visited_targets", [])
+        self.bb.set("plan_action", None)     # Will be set by behavior
         behavior = AtTarget()
         behavior.setup_with_descendants()
         
@@ -263,13 +280,17 @@ class TestPlanBehaviors:
         print(f"✓ Robot si sta allineando: {action}")
     
     def test_move_to_target(self):
-        """Test MoveToTarget - calculates closest target"""
-        print("\n[TEST] MoveToTarget - Closest target calculation")
+        """Test MoveToTarget - navigates to preset target"""
+        print("\n[TEST] MoveToTarget - Navigation to target")
         
-        # Setup - robot at origin, should go to closest target (green at 2,3)
+        # Setup - MoveToTarget requires current_target to be set (by CalculateTarget)
+        target = {'name': 'blue', 'x': 0.35, 'y': -4.0, 'theta': 0.0}
+        self.bb.set("current_target", target)
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
         self.bb.set("visited_targets", [])
         self.bb.set("obstacles", [])
+        self.bb.set("goal_pose", None)  # Will be set by behavior
+        self.bb.set("plan_action", None)  # Will be set by behavior
         behavior = MoveToTarget()
         behavior.setup_with_descendants()
         
@@ -279,14 +300,11 @@ class TestPlanBehaviors:
         # Verify
         goal_pose = self.bb.get("goal_pose")
         action = self.bb.get("plan_action")
-        current_target = self.bb.get("current_target")
         
         assert status == Status.RUNNING, f"Expected RUNNING, got {status}"
-        # Closest target from origin is 'green' at (2,3)
-        assert current_target['name'] == 'green', f"Expected closest 'green', got {current_target['name']}"
-        assert goal_pose == {'x': 2.0, 'y': 3.0, 'theta': 0.0}, f"Goal pose errato: {goal_pose}"
+        assert goal_pose == target, f"Goal pose errato: {goal_pose}"
+        assert action is not None, "Action non impostato"
         
-        print(f"✓ Closest target selected: {current_target['name']}")
         print(f"✓ Goal pose: {goal_pose}")
         print(f"✓ Action: {action}")
     
@@ -480,10 +498,12 @@ class TestPlanBehaviors:
         print(f"✓ Segnale aggiunto: {signals}")
     
     def test_go_around_person(self):
-        """Test GoAroundP - evita persona"""
+        """Test GoAroundP - evita persona based on detection_zone"""
         print("\n[TEST] GoAroundP")
         
-        # Setup
+        # Setup - person detected on left, should turn right
+        self.bb.set("detection_zone", "left")
+        self.bb.set("plan_action", None)
         behavior = GoAroundP()
         behavior.setup_with_descendants()
         
@@ -493,14 +513,16 @@ class TestPlanBehaviors:
         # Verify
         action = self.bb.get("plan_action")
         assert status == Status.SUCCESS, f"Expected SUCCESS, got {status}"
-        assert action == "AVOID_OBSTACLE", f"Expected AVOID_OBSTACLE, got {action}"
+        assert action == "TURN_RIGHT", f"Expected TURN_RIGHT (person on left), got {action}"
         print(f"✓ Action impostato: {action}")
     
     def test_go_around_obstacle(self):
-        """Test GoAroundO - evita ostacolo"""
+        """Test GoAroundO - evita ostacolo based on detection_zone"""
         print("\n[TEST] GoAroundO")
         
-        # Setup
+        # Setup - obstacle detected on right, should turn left
+        self.bb.set("detection_zone", "right")
+        self.bb.set("plan_action", None)
         behavior = GoAroundO()
         behavior.setup_with_descendants()
         
@@ -510,7 +532,7 @@ class TestPlanBehaviors:
         # Verify
         action = self.bb.get("plan_action")
         assert status == Status.SUCCESS, f"Expected SUCCESS, got {status}"
-        assert action == "AVOID_OBSTACLE", f"Expected AVOID_OBSTACLE, got {action}"
+        assert action == "TURN_LEFT", f"Expected TURN_LEFT (obstacle on right), got {action}"
         print(f"✓ Action impostato: {action}")
     
     def test_active_valve(self):
