@@ -27,8 +27,8 @@ from py_trees.common import Status, ParallelPolicy
 KNOWN_TARGETS = {
     # Color-based targets - robot will visit these and check for valve
     'green': {'x': -3.35, 'y': -5.0, 'theta': -1.65},
-    #'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
-    #'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0},  # This is actually the valve, but robot doesn't know
+    'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
+    'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0},  # This is actually the valve, but robot doesn't know
 }
 
 # HOME/SPAWN POSITION - Will be saved automatically when robot starts
@@ -551,11 +551,11 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         #2. It's close enough (< 2.0m estimated)
         #3. Confidence is high enough (> 0.5)
         #NOTE: We check even while avoiding - keep turning until obstacle is out of view
-        CAMERA_AVOID_THRESHOLD = 0.5  #meters - react only when person is close
+        CAMERA_AVOID_THRESHOLD = 1.5  #meters - react earlier (safety margin)
         
         obstacle_visible = (found in ['person', 'obstacle'] 
                            and detection_distance < CAMERA_AVOID_THRESHOLD 
-                           and detection_confidence > 0.5)
+                           and detection_confidence > 0.4)
         
         if obstacle_visible:
             #Obstacle is visible - keep turning to avoid it
