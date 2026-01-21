@@ -46,45 +46,39 @@ def calculate_best_direction(distance_left, distance_center, distance_right, thr
     """
     Calculate the optimal movement direction based on 3 distance sensors.
     
-    FIRST evaluates ALL sensors, THEN decides the best action.
-    This ensures the robot is aware of obstacles on all sides before moving.
-    
-    Args:
-        distance_left: Distance reading from left sensor (meters)
-        distance_center: Distance reading from center sensor (meters)  
-        distance_right: Distance reading from right sensor (meters)
-        threshold: Minimum safe distance to consider path clear (default 0.5m)
-    
-    Returns:
-        str: One of 'MOVE_FORWARD', 'TURN_LEFT', 'TURN_RIGHT', or 'AVOID_OBSTACLE'
+    Logic:
+    1. Safety: If ALL sensors < 0.2m -> AVOID_OBSTACLE (Spin)
+    2. Frontal Obstacle: If Center < threshold -> Turn to side with MORE space.
+    3. Center Clear:
+       - Check Side Safety (Wall Following):
+         If side < 0.3m -> Turn AWAY to align.
+       - Else -> MOVE_FORWARD.
     """
-    #Evaluate ALL sensors FIRST 
-    left_blocked = distance_left < threshold
-    center_blocked = distance_center < threshold
-    right_blocked = distance_right < threshold
-    
-    #Decide based on complete awareness
-    if left_blocked and center_blocked and right_blocked:
-        #All directions blocked - need to escape (spin)
+    # 1. Safety Panic Check (Too close to everything)
+    SAFETY_LIMIT = 0.2
+    if distance_left < SAFETY_LIMIT and distance_center < SAFETY_LIMIT and distance_right < SAFETY_LIMIT:
         return 'AVOID_OBSTACLE'
     
-    if not center_blocked:
-        #Center is clear - but check if sides are too close for safety
-        if left_blocked and not right_blocked:
-            #Something on left, veer right while moving forward
-            return 'TURN_RIGHT'
-        elif right_blocked and not left_blocked:
-            #Something on right, veer left while moving forward
-            return 'TURN_LEFT'
+    # 2. Frontal Obstacle Check (Primary Trigger)
+    if distance_center < threshold:
+        # Center is blocked - we MUST turn.
+        # Compare Left vs Right to find the best escape route.
+        if distance_left > distance_right:
+            return 'TURN_LEFT'  # Left has more space
         else:
-            #Center clear and no side obstacles
-            return 'MOVE_FORWARD'
-    else:
-        #Center is blocked - choose the side with more space
-        if distance_left >= distance_right:
-            return 'TURN_LEFT'
-        else:
-            return 'TURN_RIGHT'
+            return 'TURN_RIGHT' # Right has more space
+            
+    # 3. Center is Clear - check for Wall Alignment / Side Safety
+    SIDE_SAFETY_THRESHOLD = 0.3 # meters
+    
+    if distance_left < SIDE_SAFETY_THRESHOLD:
+        return 'TURN_RIGHT' # Too close/angled to left wall -> Align right
+        
+    if distance_right < SIDE_SAFETY_THRESHOLD:
+        return 'TURN_LEFT'  # Too close/angled to right wall -> Align left
+        
+    # Safe to move forward (follow wall)
+    return 'MOVE_FORWARD'
 
 
 def calculate_closest_target(robot_pos, visited_targets):
@@ -343,11 +337,11 @@ class AtTarget(py_trees.behaviour.Behaviour):
         Check if robot has arrived at the target.
         
         Ultra-Simplified Logic:
-        1. Check distance to target coordinates (< 0.5m)
-        2. If close, STOP and check color
-        3. Mark visited and check if valve (red)
+        1. Check distance to target coordinates (< 0.1m)
+        2. If close, STOP and WAIT 3 seconds.
+        3. After wait, check color and mark visited.
     """
-    ARRIVAL_THRESHOLD = 0.0 # 10cm precision - "Arriva alle coordinate"
+    ARRIVAL_THRESHOLD = 0.1  # 10cm precision
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -358,16 +352,18 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("found", access=py_trees.common.Access.WRITE)
+        
+        self.wait_start_time = None
 
     def update(self):
         target = self.bb.get("current_target")
         if not target:
             return Status.FAILURE
         
-        # Get robot position (no correction for now, keep it simple)
+        # Get robot position
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         
-        # Calculate distance to TARGET coordinates
+        # Calculate distance
         robot_x = robot_pos.get('x', 0.0)
         robot_y = robot_pos.get('y', 0.0)
         robot_theta = robot_pos.get('theta', 0.0)
@@ -378,31 +374,42 @@ class AtTarget(py_trees.behaviour.Behaviour):
         
         # Step 1: Check distance to coordinates
         if distance_to_target > self.ARRIVAL_THRESHOLD:
-            return Status.FAILURE  # Not close enough, keep navigating
+            self.wait_start_time = None  # Reset timer if we move away
+            return Status.FAILURE
             
-        # Step 2: We are at the coordinates! STOP.
+        # Step 2: We are at coordinates! STOP.
         self.bb.set("plan_action", "STOP")
         
+        # Step 3: Wait 3 seconds
+        if self.wait_start_time is None:
+            self.wait_start_time = time.time()
+            print(f"[DEBUG][AtTarget] Arrivato a {target['name'].upper()}. Attendo 3 secondi...")
+            return Status.RUNNING
+        
+        if time.time() - self.wait_start_time < 3.0:
+            return Status.RUNNING
+            
+        # Step 4: Time expired - Process Target
         detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
         
-        print(f"[DEBUG][AtTarget] ARRIVATO a {target_name.upper()}! Dist: {distance_to_target:.2f}m | Colore: {detected_color or 'nessuno'}")
+        print(f"[DEBUG][AtTarget] 3 secondi passati! Dist: {distance_to_target:.2f}m | Colore: {detected_color or 'nessuno'}")
         print(f"[DEBUG][AtTarget] Pos: ({robot_x:.2f}, {robot_y:.2f}) θ={robot_theta:.1f}°")
         
-        # Step 3: Mark target as visited
+        # Step 5: Mark target as visited
         visited = self.bb.get("visited_targets") or []
         if target_name not in visited:
             visited.append(target_name)
             self.bb.set("visited_targets", visited)
             print(f"[DEBUG][AtTarget] Target {target_name.upper()} marcato come visitato!")
         
-        # Step 4: Check if this is the valve (red color)
+        # Step 6: Check if this is the valve (red color)
         if detected_color == "red":
             print(f"[DEBUG][AtTarget] === VALVOLA TROVATA! ===")
             self.bb.set("found", "valve")
             return Status.SUCCESS
         
-        # Not the valve - clear current target so CalculateTarget picks simpler one
+        # Not the valve - clear current target
         self.bb.set("current_target", None)
         print(f"[DEBUG][AtTarget] Non è la valvola, passo al prossimo target...")
         return Status.SUCCESS
