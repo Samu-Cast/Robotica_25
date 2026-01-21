@@ -597,7 +597,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         #2. It's close enough (< 2.0m estimated)
         #3. Confidence is high enough (> 0.5)
         #NOTE: We check even while avoiding - keep turning until obstacle is out of view
-        CAMERA_AVOID_THRESHOLD = 2.0  #meters
+        CAMERA_AVOID_THRESHOLD = 0.35  #meters - react only when person is close
         
         obstacle_visible = (found in ['person', 'obstacle'] 
                            and detection_distance < CAMERA_AVOID_THRESHOLD 
@@ -644,7 +644,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         #C. RECOVERY (Post-Avoidance)
         if self.avoiding:
             #Obstacle is cleared, but we need to move away from it before turning back
-            if self.recovery_steps < 15:  #~1.5 seconds at 10Hz
+            if self.recovery_steps < 3:  #~0.3 seconds - quick recovery then recalculate
                 if self.recovery_steps == 0:
                     print(f"[DEBUG][MoveToTarget] Recupero post-ostacolo: avanzo per superare...")
                 action = "MOVE_FORWARD"
