@@ -27,8 +27,8 @@ from py_trees.common import Status, ParallelPolicy
 KNOWN_TARGETS = {
     # Color-based targets - robot will visit these and check for valve
     'green': {'x': -3.35, 'y': -5.0, 'theta': -1.65},
-    'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
-    'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0},  # This is actually the valve, but robot doesn't know
+    #'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
+    #'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0},  # This is actually the valve, but robot doesn't know
 }
 
 # HOME/SPAWN POSITION - Will be saved automatically when robot starts
@@ -368,8 +368,12 @@ class AtTarget(py_trees.behaviour.Behaviour):
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         
         # Calculate distance to TARGET coordinates
-        dx = target['x'] - robot_pos.get('x', 0.0)
-        dy = target['y'] - robot_pos.get('y', 0.0)
+        robot_x = robot_pos.get('x', 0.0)
+        robot_y = robot_pos.get('y', 0.0)
+        robot_theta = robot_pos.get('theta', 0.0)
+        
+        dx = target['x'] - robot_x
+        dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
         # Step 1: Check distance only
@@ -383,6 +387,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
         target_name = target.get("name")
         
         print(f"[DEBUG][AtTarget] ARRIVATO a {target_name.upper()}! Dist: {distance_to_target:.2f}m | Colore: {detected_color or 'nessuno'}")
+        print(f"[DEBUG][AtTarget] Pos: ({robot_x:.2f}, {robot_y:.2f}) θ={robot_theta:.1f}°")
         
         # Step 3: Mark target as visited
         visited = self.bb.get("visited_targets") or []
