@@ -340,18 +340,14 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
 
 class AtTarget(py_trees.behaviour.Behaviour):
     """
-        Check if robot has arrived at the SPECIFIC target coordinates.
+        Check if robot has arrived at the target.
         
-        Logic:
-        1. Calculate distance to target using odometry (with correction)
-        2. If close enough (< ARRIVAL_THRESHOLD), proceed to alignment
-        3. Align with wall using sensors (left == right)
-        4. Check color and mark visited
+        Ultra-Simplified Logic:
+        1. Check distance to target coordinates (< 1.0m)
+        2. If close, STOP and check color
+        3. Mark visited and check if valve (red)
     """
-    #Threshold to consider "arrived" at target
-    ARRIVAL_THRESHOLD = 0.5
-    #Threshold to approach wall
-    NEAR_WALL_THRESHOLD = 0.45
+    ARRIVAL_THRESHOLD = 1.0  # Lenient threshold
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -359,104 +355,50 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
         self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
-        self.bb.register_key("odom_correction", access=py_trees.common.Access.WRITE)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
-        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
-        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
-        self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("found", access=py_trees.common.Access.WRITE)
-        self.bb.register_key("color_area", access=py_trees.common.Access.READ)
 
     def update(self):
         target = self.bb.get("current_target")
         if not target:
             return Status.FAILURE
         
-        #Get corrected robot position
-        robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
-        odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+        # Get robot position (no correction for now, keep it simple)
+        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         
-        robot_x = robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0)
-        robot_y = robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0)
-        
-        #Calculate distance to TARGET coordinates
-        dx = target['x'] - robot_x
-        dy = target['y'] - robot_y
+        # Calculate distance to TARGET coordinates
+        dx = target['x'] - robot_pos.get('x', 0.0)
+        dy = target['y'] - robot_pos.get('y', 0.0)
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
-        #Step 1: Check if we're close to the TARGET position
+        # Step 1: Check distance only
         if distance_to_target > self.ARRIVAL_THRESHOLD:
-            #Not at target yet - let MoveToTarget continue navigating
-            return Status.FAILURE
+            return Status.FAILURE  # Not close enough, keep navigating
         
-        #Read distance sensors
-        dist_left = self.bb.get("distance_left")
-        dist_right = self.bb.get("distance_right")
-        dist_center = self.bb.get("distance_center")
-        
-        print(f"[DEBUG][AtTarget] Vicino al target {target['name'].upper()}! Distanza: {distance_to_target:.2f}m")
-        
-        #Step 2: Check if we need to approach the wall more
-        if dist_center is None or dist_center > self.NEAR_WALL_THRESHOLD:
-            #Keep moving forward to get closer
-            self.bb.set("plan_action", "MOVE_FORWARD")
-            dist_str = f"{dist_center:.2f}" if dist_center is not None else "None"
-            print(f"[DEBUG][AtTarget] Avvicinamento al muro... dist_center: {dist_str}m")
-            return Status.RUNNING
-        
-        #Step 3: Align with wall (left == right distance)
-        if not check_wall_alignment(dist_left, dist_right, threshold=0.08):
-            if dist_left is not None and dist_right is not None:
-                if dist_left > dist_right:
-                    self.bb.set("plan_action", "TURN_LEFT")
-                else:
-                    self.bb.set("plan_action", "TURN_RIGHT")
-                print(f"[DEBUG][AtTarget] Allineamento... L={dist_left:.2f}m R={dist_right:.2f}m")
-            return Status.RUNNING
-        
-        #Step 4: Aligned! Stop and process
+        # Step 2: We are close enough! STOP.
         self.bb.set("plan_action", "STOP")
         
         detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
         
-        print(f"[DEBUG][AtTarget] ARRIVATO al target {target_name.upper()}! Colore: {detected_color or 'nessuno'}")
+        print(f"[DEBUG][AtTarget] ARRIVATO a {target_name.upper()}! Dist: {distance_to_target:.2f}m | Colore: {detected_color or 'nessuno'}")
         
-        #Step 5: Check color area to confirm we're close enough
-        color_area = self.bb.get("color_area") or 0
-        MIN_COLOR_AREA = 5000  #Minimum area to confirm we're at the target
-        
-        if color_area < MIN_COLOR_AREA:
-            #Area too small - not close enough, keep approaching
-            print(f"[DEBUG][AtTarget] Area colore troppo piccola ({color_area} < {MIN_COLOR_AREA}), avvicino...")
-            self.bb.set("plan_action", "MOVE_FORWARD")
-            return Status.RUNNING
-        
-        #Step 6: Area OK - we're really at the target
-        #Calculate odometry correction offset (update with this position)
-        new_correction = {
-            'dx': target['x'] - robot_pos_raw.get('x', 0.0),
-            'dy': target['y'] - robot_pos_raw.get('y', 0.0),
-            'dtheta': target['theta'] - robot_pos_raw.get('theta', 0.0)
-        }
-        self.bb.set("odom_correction", new_correction)
-        print(f"[DEBUG][AtTarget] Correzione odometria aggiornata: dx={new_correction['dx']:.2f}m, dy={new_correction['dy']:.2f}m")
-        
-        #Step 7: Mark target as visited (only after confirming area is OK)
+        # Step 3: Mark target as visited
         visited = self.bb.get("visited_targets") or []
         if target_name not in visited:
             visited.append(target_name)
             self.bb.set("visited_targets", visited)
             print(f"[DEBUG][AtTarget] Target {target_name.upper()} marcato come visitato!")
         
-        #Step 8: Check if this is the valve (red color)
+        # Step 4: Check if this is the valve (red color)
         if detected_color == "red":
-            print(f"[DEBUG][AtTarget] === VALVOLA TROVATA! (area: {color_area}) === TORNO A CASA!")
+            print(f"[DEBUG][AtTarget] === VALVOLA TROVATA! ===")
             self.bb.set("found", "valve")
             return Status.SUCCESS
         
-        #Not the valve - go to next target
+        # Not the valve - clear current target so CalculateTarget picks simpler one
+        self.bb.set("current_target", None)
         print(f"[DEBUG][AtTarget] Non è la valvola, passo al prossimo target...")
         return Status.SUCCESS
 
@@ -597,7 +539,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         #2. It's close enough (< 2.0m estimated)
         #3. Confidence is high enough (> 0.5)
         #NOTE: We check even while avoiding - keep turning until obstacle is out of view
-        CAMERA_AVOID_THRESHOLD = 0.35  #meters - react only when person is close
+        CAMERA_AVOID_THRESHOLD = 0.5  #meters - react only when person is close
         
         obstacle_visible = (found in ['person', 'obstacle'] 
                            and detection_distance < CAMERA_AVOID_THRESHOLD 
