@@ -343,11 +343,11 @@ class AtTarget(py_trees.behaviour.Behaviour):
         Check if robot has arrived at the target.
         
         Ultra-Simplified Logic:
-        1. Check distance to target coordinates (< 1.0m)
+        1. Check distance to target coordinates (< 0.5m)
         2. If close, STOP and check color
         3. Mark visited and check if valve (red)
     """
-    ARRIVAL_THRESHOLD = 1.0  # Lenient threshold
+    ARRIVAL_THRESHOLD = 0.0 # 10cm precision - "Arriva alle coordinate"
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -376,11 +376,11 @@ class AtTarget(py_trees.behaviour.Behaviour):
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
-        # Step 1: Check distance only
+        # Step 1: Check distance to coordinates
         if distance_to_target > self.ARRIVAL_THRESHOLD:
             return Status.FAILURE  # Not close enough, keep navigating
-        
-        # Step 2: We are close enough! STOP.
+            
+        # Step 2: We are at the coordinates! STOP.
         self.bb.set("plan_action", "STOP")
         
         detected_color = self.bb.get("detected_color")
