@@ -34,6 +34,7 @@ services:
       - ros2-sim
     environment:
       - ROS_DOMAIN_ID=42
+      - USE_NNPACK=0
     volumes:
       - ../src/sense/:/home/ubuntu/sense_ws/
     deploy:
