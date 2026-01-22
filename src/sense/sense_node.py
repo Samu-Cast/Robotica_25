@@ -21,6 +21,10 @@ Uses modules:
 import json
 import numpy as np
 
+import os
+os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
+os.environ.setdefault("KMP_WARNINGS", "0")
+
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan, Image, Range, BatteryState
