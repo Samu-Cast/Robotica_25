@@ -423,7 +423,7 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         self.bb.register_key("home_position", access=py_trees.common.Access.WRITE)
         self.start_time = None
-        self.duration = 4.0  # Seconds to retreat
+        self.duration = 20.0  # Seconds to retreat
         self._logged_start = False
         self._home_saved = False
     

@@ -132,7 +132,7 @@ class PlanNode(Node):
             #Check if simulation has started (time > 0)
             if msg.clock.sec > 0 or msg.clock.nanosec > 0:
                 self.get_logger().info(f'Simulation started (time={msg.clock.sec}s)! Waiting 20s for stabilization...')
-                self._startup_timer = self.create_timer(20.0, self._start_behavior_tree)
+                self._startup_timer = self.create_timer(60.0, self._start_behavior_tree)
     
     def _start_behavior_tree(self):
         """Called after clock detected + 20 seconds delay."""
