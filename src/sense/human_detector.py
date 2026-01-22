@@ -8,12 +8,9 @@ import os
 from pathlib import Path
 
 try:
-    from ultralytics import YOLO
-    YOLO_AVAILABLE = True
-except ImportError:
-    YOLO_AVAILABLE = False
-    print("Warning: ultralytics not installed. Human detection disabled.")
-
+    import torch
+except Exception:
+    torch = None
 
 class HumanDetector:
     """
@@ -32,7 +29,17 @@ class HumanDetector:
         self.conf_threshold = conf_threshold
         self.model = None
         
-        if not YOLO_AVAILABLE:
+
+        if torch is not None:
+            try:
+                torch.backends.nnpack.enabled = False
+            except Exception:
+                pass
+        
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            print("Warning: ultralytics not installed. Human detection disabled.")
             return
         
         try:
