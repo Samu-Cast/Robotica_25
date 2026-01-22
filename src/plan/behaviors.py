@@ -28,7 +28,7 @@ KNOWN_TARGETS = {
     # Color-based targets - robot will visit these and check for valve
     'green': {'x': -3.35, 'y': -5.0, 'theta': -1.65},
     #'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
-    #'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0},  # This is actually the valve, but robot doesn't know
+    'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0},  # This is actually the valve, but robot doesn't know
 }
 
 # HOME/SPAWN POSITION - Will be saved automatically when robot starts
@@ -342,12 +342,12 @@ class AtTarget(py_trees.behaviour.Behaviour):
     """
         Check if robot has arrived at the target.
         
-        Ultra-Simplified Logic:
-        1. Check distance to target coordinates (< 0.5m)
-        2. If close, STOP and check color
-        3. Mark visited and check if valve (red)
+        Logic:
+        1. If color detected at ~2m: Enter "charge color" mode - go straight to wall, ignore obstacles
+        2. If bumper is pressed: ARRIVAL detected - Stop and mark as visited
+        3. Check if found the valve (red color)
     """
-    ARRIVAL_THRESHOLD = 0.0 # 10cm precision - "Arriva alle coordinate"
+    COLOR_DETECTION_DISTANCE = 1.0  # When color becomes visible (~2m) - enter charge mode
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -358,51 +358,84 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("found", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("bumper", access=py_trees.common.Access.READ)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
+        self._color_detected_logged = False  # Prevent spam logging
 
     def update(self):
         target = self.bb.get("current_target")
         if not target:
             return Status.FAILURE
         
-        # Get robot position (no correction for now, keep it simple)
-        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        # Get robot position with odometry correction
+        robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
         
-        # Calculate distance to TARGET coordinates
+        robot_pos = {
+            'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
+            'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
+            'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+        }
+        
         robot_x = robot_pos.get('x', 0.0)
         robot_y = robot_pos.get('y', 0.0)
         robot_theta = robot_pos.get('theta', 0.0)
         
+        # Calculate distance to target (for reference/logging)
         dx = target['x'] - robot_x
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
-        # Step 1: Check distance to coordinates
-        if distance_to_target > self.ARRIVAL_THRESHOLD:
-            return Status.FAILURE  # Not close enough, keep navigating
-            
-        # Step 2: We are at the coordinates! STOP.
-        self.bb.set("plan_action", "STOP")
-        
         detected_color = self.bb.get("detected_color")
+        bumper_pressed = self.bb.get("bumper")
         target_name = target.get("name")
         
-        print(f"[DEBUG][AtTarget] ARRIVATO a {target_name.upper()}! Dist: {distance_to_target:.2f}m | Colore: {detected_color or 'nessuno'}")
+        # STEP 1: Color Detection Mode (~2m away)
+        # When we detect the color at this distance, charge straight to the wall
+        if detected_color and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
+            if not self._color_detected_logged:
+                print(f"[DEBUG][AtTarget] === COLORE RILEVATO! === {detected_color.upper()} a {target_name.upper()} (dist: {distance_to_target:.2f}m)")
+                print(f"[DEBUG][AtTarget] Carica diretta verso il muro, ignoro ostacoli!")
+                self._color_detected_logged = True
+            
+            # Set action to move straight forward, ignoring obstacles
+            self.bb.set("plan_action", "CHARGE_COLOR")
+            
+            # If we detect red, we've found the valve
+            if detected_color == "red":
+                print(f"[DEBUG][AtTarget] === VALVOLA TROVATA! ===")
+                self.bb.set("found", "valve")
+            
+            return Status.RUNNING  # Keep charging until bumper pressed
+        
+        # Reset logging flag if color is no longer detected or too far
+        if not detected_color or distance_to_target > self.COLOR_DETECTION_DISTANCE:
+            self._color_detected_logged = False
+        
+        # STEP 2: Bumper Activation (Physical Arrival)
+        if not bumper_pressed:
+            return Status.FAILURE  # Bumper not pressed, keep navigating
+            
+        # Step 3: Bumper activated! STOP.
+        self.bb.set("plan_action", "STOP")
+        
+        print(f"[DEBUG][AtTarget] BUMPER ATTIVATO! Arrivato a {target_name.upper()}! Dist stimata: {distance_to_target:.2f}m | Colore: {detected_color or 'nessuno'}")
         print(f"[DEBUG][AtTarget] Pos: ({robot_x:.2f}, {robot_y:.2f}) θ={robot_theta:.1f}°")
         
-        # Step 3: Mark target as visited
+        # Step 4: Mark target as visited
         visited = self.bb.get("visited_targets") or []
         if target_name not in visited:
             visited.append(target_name)
             self.bb.set("visited_targets", visited)
             print(f"[DEBUG][AtTarget] Target {target_name.upper()} marcato come visitato!")
         
-        # Step 4: Check if this is the valve (red color)
+        # Step 5: Check if this is the valve (red color)
         if detected_color == "red":
             print(f"[DEBUG][AtTarget] === VALVOLA TROVATA! ===")
             self.bb.set("found", "valve")
             return Status.SUCCESS
         
-        # Not the valve - clear current target so CalculateTarget picks simpler one
+        # Not the valve - clear current target so CalculateTarget picks next one
         self.bb.set("current_target", None)
         print(f"[DEBUG][AtTarget] Non è la valvola, passo al prossimo target...")
         return Status.SUCCESS
@@ -530,6 +563,16 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         
         #Thresholds
         OBSTACLE_DIST = 0.5
+        
+        #CHECK FOR CHARGE_COLOR MODE (Ignore obstacles, go straight to colored wall)
+        current_action = self.bb.get("plan_action")
+        if current_action == "CHARGE_COLOR":
+            #In charge mode - ignore all obstacles, go straight
+            self.bb.set("plan_action", "MOVE_FORWARD")
+            if self._debug_tick % 20 == 0:
+                print(f"[DEBUG][MoveToTarget] MODALITÀ CARICA COLORE ATTIVA - Vado dritto verso {target['name'].upper()}!")
+            self._debug_tick += 1
+            return Status.RUNNING
         
         #LOGIC START
         

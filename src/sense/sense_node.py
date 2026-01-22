@@ -30,7 +30,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import LaserScan, Image, Range, BatteryState
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose2D
-from std_msgs.msg import String, Float32
+from std_msgs.msg import String, Float32, Bool
 from cv_bridge import CvBridge
 
 # Import detection modules
@@ -84,6 +84,7 @@ class SenseNode(Node):
         }
         self.odometry = {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.battery_level = None  # None until first message received
+        self.bumper_pressed = False  # Bumper sensor state
         self.color_detections = {'targets': []}
         self.human_detections = {'person_detected': False, 'persons': []}
         
@@ -115,6 +116,7 @@ class SenseNode(Node):
         self.create_subscription(Image, '/camera_front/image', self._camera_callback, 10)
         self.create_subscription(Odometry, '/odom', self._odom_callback, 10)
         self.create_subscription(BatteryState, '/battery_state', self._battery_callback, 10)
+        self.create_subscription(Bool, '/bumper', self._bumper_callback, 10)
         
         # === PUBLISHERS ===
         # Proximity sensors (Range messages)
@@ -135,6 +137,9 @@ class SenseNode(Node):
         
         # Battery (Float32 percentage)
         self.battery_pub = self.create_publisher(Float32, '/sense/battery', 10)
+        
+        # Bumper (Bool)
+        self.bumper_pub = self.create_publisher(Bool, '/sense/bumper', 10)
         
         # Timer to publish proximity and odometry at fixed rate
         self.create_timer(0.1, self._publish_periodic)  # 10 Hz
@@ -169,6 +174,10 @@ class SenseNode(Node):
         """Process battery state"""
         # BatteryState.percentage is 0.0-1.0, convert to 0-100
         self.battery_level = msg.percentage * 100.0
+    
+    def _bumper_callback(self, msg: Bool):
+        """Process bumper sensor state"""
+        self.bumper_pressed = msg.data
     
     def _camera_callback(self, msg: Image):
         """Process camera image for color and human detection"""
@@ -407,6 +416,11 @@ class SenseNode(Node):
             battery_msg = Float32()
             battery_msg.data = self.battery_level
             self.battery_pub.publish(battery_msg)
+        
+        # Publish bumper
+        bumper_msg = Bool()
+        bumper_msg.data = self.bumper_pressed
+        self.bumper_pub.publish(bumper_msg)
     
     def _draw_debug(self, frame):
         """Draw debug information on frame"""
