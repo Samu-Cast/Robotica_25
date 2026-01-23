@@ -86,7 +86,7 @@ class PlanNode(Node):
             'detected_color', 'color_area', 'odom_correction', 'detection_zone',
             'detection_distance', 'detection_confidence',
             'distance_left', 'distance_center', 'distance_right',
-            'robot_position', 'startup_complete', 'home_position', 'bumper'
+            'robot_position', 'startup_complete', 'home_position', 'bumper', 'bumper_event'
         ]
         for key in blackboard_keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
@@ -109,8 +109,10 @@ class PlanNode(Node):
         )
         self.create_subscription(Pose2D, '/sense/odometry', self._odom_cb, 10)
         self.create_subscription(String, '/sense/detection', self._detection_cb, 10)
+        self.create_subscription(String, '/sense/detection_zone', self._detection_zone_cb, 10)
         self.create_subscription(Float32, '/sense/battery', self._battery_cb, 10)
         self.create_subscription(Bool, '/sense/bumper', self._bumper_cb, 10)
+        self.create_subscription(Bool, '/sense/bumper_event', self._bumper_event_cb, 10)
         
         #Publishers to Act module
         self.cmd_pub = self.create_publisher(String, '/plan/command', 10)
@@ -179,6 +181,7 @@ class PlanNode(Node):
         self.bb.set("distance_center", 999.0)
         self.bb.set("distance_right", 999.0)
         self.bb.set("bumper", False)
+        self.bb.set("bumper_event", False)
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
         self.bb.set("startup_complete", False)
     
@@ -220,9 +223,40 @@ class PlanNode(Node):
     
     def _bumper_cb(self, msg):
         """
-        Callback for bumper sensor (Bool).
+        Callback for bumper sensor (Bool) - continuous state.
         """
+        previous_bumper = self.bb.get("bumper")
         self.bb.set("bumper", msg.data)
+        
+        if msg.data and not previous_bumper:
+            self.get_logger().info("🔴 [PLAN] Bumper state changed to TRUE")
+    
+    def _detection_zone_cb(self, msg):
+        """
+        Callback for detection zone (String: 'left', 'center', 'right', 'none').
+        Continuously updated by Sense module for color centering.
+        
+        Args:
+            msg: String message with zone
+        """
+        zone = msg.data if msg.data in ['left', 'center', 'right', 'none'] else None
+        self.bb.set("detection_zone", zone)
+    
+    def _bumper_event_cb(self, msg):
+        """
+        Callback for bumper event (Bool - True only when collision is detected).
+        This is the edge-triggered version of the bumper sensor.
+        
+        Args:
+            msg: Bool message (True = collision just happened)
+        """
+        if msg.data:  # Only set bumper when collision is detected
+            self.bb.set("bumper_event", True)
+            self.get_logger().warn("🔴 [BUMPER_EVENT] COLLISION EVENT RECEIVED - Bumper set to TRUE")
+        else:
+            # When bumper_event goes False, we don't reset bumper here
+            # AtTarget is responsible for resetting bumper after processing
+            pass
     
     def _detection_cb(self, msg):
         """

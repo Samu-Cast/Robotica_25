@@ -481,50 +481,6 @@ class AtTarget(py_trees.behaviour.Behaviour):
                 
                 return Status.SUCCESS  # Mission complete!
             
-            # ========================================================================
-            # STEP 2b: NOT the valve - Enter BACKUP phase
-            # ========================================================================
-            print(f"[DEBUG][AtTarget] ❌ NOT the valve (color={detected_color}). Starting BACKUP phase...")
-            
-            if not self._backing_up:
-                print(f"[DEBUG][AtTarget] ⏱️  Backup started - will reverse for {self.BACKUP_DURATION}s")
-                self._backing_up = True
-                self._backup_start_time = time.time()
-                self.bb.set("plan_action", "MOVE_BACKWARD")
-                return Status.RUNNING
-            
-            # ========================================================================
-            # STEP 2c: During BACKUP - count 6 seconds
-            # ========================================================================
-            elapsed = time.time() - self._backup_start_time
-            if elapsed < self.BACKUP_DURATION:
-                # Still backing up
-                self.bb.set("plan_action", "MOVE_BACKWARD")
-                print(f"[DEBUG][AtTarget] ⏱️  Backing up... {elapsed:.1f}s / {self.BACKUP_DURATION}s")
-                return Status.RUNNING
-            
-            # ========================================================================
-            # STEP 2d: BACKUP complete - Mark visited & move to next target
-            # ========================================================================
-            print(f"[DEBUG][AtTarget] ✅ Backup complete! Marking {target_name.upper()} as visited.")
-            
-            # Mark target as visited
-            visited = self.bb.get("visited_targets") or []
-            if target_name not in visited:
-                visited.append(target_name)
-                self.bb.set("visited_targets", visited)
-                print(f"[DEBUG][AtTarget] Target {target_name.upper()} added to visited list")
-            
-            # Reset state for next target
-            
-            self.bb.set("bumper_event", False)
-            self.bb.set("plan_action", "STOP")
-            self.bb.set("current_target", None)
-                
-            self._backing_up = False
-            self._backup_start_time = None
-            self._color_detected_logged = False
-            self._centering_complete = False
             
             return Status.SUCCESS
         
@@ -585,6 +541,54 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
             self.bb.set("startup_complete", True)
             # DEBUG: Log completamento
             print(f"[DEBUG][InitialRetreat] Arretramento completato! Inizio navigazione...")
+            return Status.SUCCESS
+
+
+class SecondoRetreat(py_trees.behaviour.Behaviour):
+    """
+   secondo indietro quando sta in un target e non è il valvola
+    """
+    def __init__(self):
+        super().__init__(name="SecondoRetreat")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("bumper_event", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.start_time = None
+        self.duration = 6.0  # Seconds to retreat
+        self._logged_start = False
+        self._home_saved = False
+    
+    def update(self):
+        print(f"[DEBUG][SecondoRetreat] Sono dentro ({self.duration}s)...")
+
+        self.bb.set("bumper_event", False)
+        self.bb.set("plan_action", "STOP")
+        self.bb.set("current_target", None)
+                
+        self._backing_up = False
+        self._backup_start_time = None
+        self._color_detected_logged = False
+        self._centering_complete = False
+        
+        if self.start_time is None:
+            self.start_time = time.time()
+            # DEBUG: Log inizio retreat
+            print(f"[DEBUG][SecondoRetreat] Inizio arretramento dal target ({self.duration}s)...")
+            
+        elapsed = time.time() - self.start_time
+        
+        if elapsed < self.duration:
+            self.bb.set("plan_action", "MOVE_BACKWARD")
+            # DEBUG: Log progresso ogni secondo
+            if int(elapsed) > int(elapsed - 0.1) and not self._logged_start:
+                print(f"[DEBUG][InitialRetreat] Arretramento... {elapsed:.1f}s / {self.duration}s")
+            return Status.RUNNING
+        else:
+            self.bb.set("plan_action", "STOP")
+            # DEBUG: Log completamento
+            print(f"[DEBUG][InitialRetreat] Arretramento completato! Inizio prossimo Target...")
             return Status.SUCCESS
 
 
@@ -1119,7 +1123,8 @@ def build_tree():
     target_search = Sequence("TargetSearch", memory=False, children=[
         CalculateTarget(),
         goto,
-        RecognitionValve()
+        RecognitionValve(),
+        SecondoRetreat()
     ])
     
     #Retry target search until valve is found (-1 = infinite retries)
