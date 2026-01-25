@@ -26,9 +26,15 @@ from py_trees.common import Status, ParallelPolicy
 ####################################################################################
 KNOWN_TARGETS = {
     # Color-based targets - robot will visit these and check for valve
+<<<<<<< HEAD
     'green': {'x': -3.35, 'y': -5.0, 'theta': -1.65},
     'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
     'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0},  # This is actually the valve, but robot doesn't know
+=======
+    'green': {'x': -3, 'y': -6.0, 'theta': -1.57}, #la x è 
+    'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
+    'red': {'x': -7, 'y': -2.5, 'theta': 3.14},  # This is actually the valve, but robot doesn't know
+>>>>>>> giam-branch
 }
 
 # HOME/SPAWN POSITION - Will be saved automatically when robot starts
@@ -279,15 +285,22 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
+        self.bb.register_key("bumper_event", access=py_trees.common.Access.READ)
+        self.bb.register_key("detected_color", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self._last_logged_target = None  #Evita spam di log
 
     def update(self):
+        
+        print(f"[DEBUG]                                              [CalculateTarget] ")
+
         #1. Check if we already have a valid pending target (Persistence)
         current = self.bb.get("current_target")
         visited = self.bb.get("visited_targets") or []
         
         if current and current['name'] not in visited:
              #Keep current target until visited
+             print(f"IL TARGET CORRENTE è {current['name']}")
              return Status.SUCCESS
              
         robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
@@ -314,6 +327,7 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
                     closest_data = data
         
         if closest_name:
+            print(f"Sto cambiando target verso {closest_name} ")
             self.bb.set("current_target", {
                 'name': closest_name,
                 'x': closest_data['x'],
@@ -335,6 +349,7 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
 class AtTarget(py_trees.behaviour.Behaviour):
     """
         Check if robot has arrived at the target.
+<<<<<<< HEAD
         
         Ultra-Simplified Logic:
         1. Check distance to target coordinates (< 0.1m)
@@ -342,6 +357,23 @@ class AtTarget(py_trees.behaviour.Behaviour):
         3. After wait, check color and mark visited.
     """
     ARRIVAL_THRESHOLD = 0.1  # 10cm precision
+=======
+        SBAGLIATOOO
+        Complete Flow:
+        1. Color Detection (< 1m): Center the color in camera
+           - If left/right: turn until centered
+           - Once centered: go straight (CHARGE_COLOR)
+        2. Collision Detection (bumper=True):
+           - Check if valve is red (SUCCESS if found)
+           - If NOT red: Enter backup phase
+        3. Backup Phase (if not valve):
+           - Reverse for 6 seconds (BACK command)
+           - Mark target as visited
+           - Pass to next target
+    """
+    COLOR_DETECTION_DISTANCE = 1.0  # Distance threshold for color detection (meters)
+    BACKUP_DURATION = 8.0  # Backup duration in seconds
+>>>>>>> giam-branch
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -349,29 +381,64 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
         self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
-        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.WRITE)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("found", access=py_trees.common.Access.WRITE)
+<<<<<<< HEAD
         
         self.wait_start_time = None
+=======
+        self.bb.register_key("bumper_event", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("bumper", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
+        
+        self.start_time = None #per contare il tempo di retreat
+        self.duration = 15.0  # Seconds to retreat
+        self._logged_start = False #serve per
+        self._backup_start_time = None  # For backup phase timing
+
+        # Internal state
+        self._color_detected_logged = False 
+        self._centering_complete = False
+        self._backing_up = False
+        self._backup_start_time = None  
+>>>>>>> giam-branch
 
     def update(self):
         target = self.bb.get("current_target")
+        print(f"[DEBUG]                                              [AT TARGET] Verso {target['name']}")
         if not target:
             return Status.FAILURE
         
+<<<<<<< HEAD
         # Get robot position
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         
         # Calculate distance
+=======
+        
+        # Get robot position with odometry correction
+        robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+        
+        robot_pos = {
+            'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
+            'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
+            'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+        }
+        
+>>>>>>> giam-branch
         robot_x = robot_pos.get('x', 0.0)
         robot_y = robot_pos.get('y', 0.0)
         robot_theta = robot_pos.get('theta', 0.0)
         
+        # Calculate distance to target (for reference/logging)
         dx = target['x'] - robot_x
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
+<<<<<<< HEAD
         # Step 1: Check distance to coordinates
         if distance_to_target > self.ARRIVAL_THRESHOLD:
             self.wait_start_time = None  # Reset timer if we move away
@@ -391,8 +458,23 @@ class AtTarget(py_trees.behaviour.Behaviour):
             
         # Step 4: Time expired - Process Target
         detected_color = self.bb.get("detected_color")
-        target_name = target.get("name")
+=======
+        bumper1 = self.bb.get("bumper")
+
+        if distance_to_target <= self.COLOR_DETECTION_DISTANCE and bumper1==True:
+            bumper_pressed = self.bb.get("bumper_event")
+        else:
+            bumper_pressed = False
         
+        print(f"Bumper1 è {bumper1} -----------   il bumper_pressed è {bumper_pressed}")
+
+        detected_color = self.bb.get("detected_color") #colore rilevato dalla cameRA     
+        print(f"[DEBUG][AtTarget] Colore visto dalla fotocamera è {detected_color}  Il bumper è {bumper_pressed}")
+>>>>>>> giam-branch
+        target_name = target.get("name")
+        detection_zone = self.bb.get("detection_zone")  # 'left', 'center', or 'right'
+        
+<<<<<<< HEAD
         print(f"[DEBUG][AtTarget] 3 secondi passati! Dist: {distance_to_target:.2f}m | Colore: {detected_color or 'nessuno'}")
         print(f"[DEBUG][AtTarget] Pos: ({robot_x:.2f}, {robot_y:.2f}) θ={robot_theta:.1f}°")
         
@@ -413,6 +495,88 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.set("current_target", None)
         print(f"[DEBUG][AtTarget] Non è la valvola, passo al prossimo target...")
         return Status.SUCCESS
+=======
+
+        
+        # ============================================================================
+        # PHASE 1: COLOR DETECTION & CENTERING (< 1 meter)
+        # ============================================================================
+        if detected_color and distance_to_target <= self.COLOR_DETECTION_DISTANCE and bumper_pressed == False:
+            if not self._color_detected_logged:
+                print(f"[DEBUG][AtTarget] === COLOR DETECTED === {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
+                self._color_detected_logged = True 
+                self._centering_complete = False
+            
+            # PHASE 1a: Center color in camera frame
+            if detection_zone and detection_zone != 'center':
+                # Color not centered - rotate to center it
+                if detection_zone == 'left':
+                    print(f"[DEBUG][AtTarget] Color LEFT → TURN_LEFT to center")
+                    self.bb.set("plan_action", "TURN_LEFT")
+                elif detection_zone == 'right':
+                    print(f"[DEBUG][AtTarget] Color RIGHT → TURN_RIGHT to center")
+                    self.bb.set("plan_action", "TURN_RIGHT")
+                
+                return Status.RUNNING
+            else:
+                # PHASE 1b: Color is centered - charge toward it
+                if not self._centering_complete:
+                    print(f"[DEBUG][AtTarget] Color Centrato -- Verso il muro...")
+                    self._centering_complete = True
+                
+                self.bb.set("plan_action", "CHARGE_COLOR")
+                
+                return Status.RUNNING
+        
+        # Reset centering when color is lost or too far
+        if not detected_color or distance_to_target > self.COLOR_DETECTION_DISTANCE:
+            self._color_detected_logged = False
+            self._centering_complete = False
+        
+        if bumper_pressed and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
+            print(f"[DEBUG][AtTarget] 💥 COLLISIONEEEEEEE! Bumper attivato a {target_name.upper()}")
+            print(f"[DEBUG][AtTarget] Posizione: ({robot_x:.2f}, {robot_y:.2f}) | Colore: {detected_color or 'NONE'}")           
+            
+            if detected_color == "red":
+                self.bb.set("found", "valve")
+            
+            
+            # Mark target as visited
+            visited = self.bb.get("visited_targets") or []
+            if target_name not in visited:
+                visited.append(target_name)
+                self.bb.set("visited_targets", visited)
+                print(f"[DEBUG][AtTarget] Target {target_name.upper()} marcato come VISITED")
+
+            self.bb.set("plan_action", "STOP")
+                
+
+            # Reset state for next target
+            self.bb.set("current_target", None)
+            self.bb.set("bumper_event", False)  # Reset bumper event for next target
+            print(f"Dopo la collisione, resetto il bumper e il target corrente è {self.bb.get('bumper_event')}")    
+            self._backing_up = False
+            self._backup_start_time = None
+            self._color_detected_logged = False
+            self._centering_complete = False
+            print(f"Sto facendo SUCCESS finito AtTarget, dovrei anadare in SecondoRetreat")
+            self.bb.set("plan_action", "STOP")
+
+            print(f"[DEBUG][AtTarget] Correcting odometry after visit to {target_name.upper()}")
+            
+            print(f"[DEBUG][AtTarget] ✅✅✅ CORDINATE ROBOT {self.bb.get('robot_position')} ")
+            print(f"[DEBUG][AtTarget] ✅✅✅ CORDINATE TARGET {target} ")
+            print(f"[DEBUG][AtTarget] ✅✅✅ ODOMETRIA {self.bb.get('odom_correction')} ")
+            
+            print(f"[DEBUG][AtTarget] ❌❌❌ CORDINATE ROBOT {self.bb.get('robot_position')} ")
+            print(f"[DEBUG][AtTarget] ❌❌❌ CORDINATE TARGET {target} ")
+            print(f"[DEBUG][AtTarget] ❌❌❌ ODOMETRIA {self.bb.get('odom_correction')} ")
+            
+            return Status.SUCCESS
+        
+        # No bumper - not at target yet
+        return Status.FAILURE
+>>>>>>> giam-branch
 
 
 class InitialRetreat(py_trees.behaviour.Behaviour):
@@ -430,7 +594,7 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         self.bb.register_key("home_position", access=py_trees.common.Access.WRITE)
         self.start_time = None
-        self.duration = 4.0  # Seconds to retreat
+        self.duration = 20.0  # Seconds to retreat
         self._logged_start = False
         self._home_saved = False
     
@@ -468,6 +632,54 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
             self.bb.set("startup_complete", True)
             # DEBUG: Log completamento
             print(f"[DEBUG][InitialRetreat] Arretramento completato! Inizio navigazione...")
+            return Status.SUCCESS
+
+
+class SecondoRetreat(py_trees.behaviour.Behaviour):
+    """
+   secondo indietro quando sta in un target e non è il valvola
+    """
+    def __init__(self):
+        super().__init__(name="SecondoRetreat")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("bumper_event", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.start_time = None #per contare il tempo di retreat
+        self.duration = 15.0  # Seconds to retreat
+        self._logged_start = False #serve per
+        
+    
+    def update(self):
+        print(f"[DEBUG]                           [SecondoRetreat]" )
+
+        self.bb.set("bumper_event", False)
+        self.bb.set("plan_action", "STOP")
+        self.bb.set("current_target", None)
+                
+        self._backing_up = False
+        self._backup_start_time = None
+        self._color_detected_logged = False
+        self._centering_complete = False
+        
+        if self.start_time is None:
+            self.start_time = time.time()
+            # DEBUG: Log inizio retreat
+            print(f"[DEBUG][SecondoRetreat] Inizio arretramento dal target ({self.duration}s)...")
+            
+        elapsed = time.time() - self.start_time #time.time - self.start_time mi
+        print(f"tempo trascorso: {elapsed}, durata: {self.duration}") 
+        if elapsed < self.duration: #arretro se 
+            print(f"STO ARRETRANDO ACT= BACK")
+            self.bb.set("plan_action", "MOVE_BACKWARD")
+            # DEBUG: Log progresso ogni secondo
+            print(f"[DEBUG][SecondoRetreat] Arretramento... {elapsed:.1f}s / {self.duration}s")
+            return Status.RUNNING
+        else:
+            self.bb.set("plan_action", "STOP")
+            # DEBUG: Log completamento
+            print(f"[DEBUG][SecondoRetreat] Arretramento completato! Inizio prossimo Target...")
             return Status.SUCCESS
 
 
@@ -513,6 +725,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
 
     def update(self):
         #Get Target (Persistent)
+        #Fallisce 
         target = self.bb.get("current_target")
         if not target:
             self.bb.set("plan_action", "STOP")
@@ -537,6 +750,16 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         
         #Thresholds
         OBSTACLE_DIST = 0.5
+        
+        #CHECK FOR CHARGE_COLOR MODE (Ignore obstacles, go straight to colored wall)
+        current_action = self.bb.get("plan_action")
+        if current_action == "CHARGE_COLOR":
+            #In charge mode - ignore all obstacles, go straight
+            self.bb.set("plan_action", "MOVE_FORWARD")
+            if self._debug_tick % 20 == 0:
+                print(f"[DEBUG][MoveToTarget] MODALITÀ CARICA COLORE ATTIVA - Vado dritto verso {target['name'].upper()}!")
+            self._debug_tick += 1
+            return Status.RUNNING
         
         #LOGIC START
         
@@ -663,8 +886,8 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         if self._debug_tick % 20 == 0:
             angle_deg = math.degrees(angle_diff)
             theta_deg = math.degrees(robot_theta)
-            print(f"[DEBUG][MoveToTarget] NAV → {target['name'].upper()} | Dist: {distance_to_target:.2f}m | Errore ang: {angle_deg:.1f}° | Azione: {action}")
-            print(f"[DEBUG][MoveToTarget] Pos: ({robot_x:.2f}, {robot_y:.2f}) θ={theta_deg:.1f}° | Sensori: L={d_left:.2f} C={d_center:.2f} R={d_right:.2f}")
+            print(f"[DEBUG][MoveToTarget] NAV → {target['name'].upper()} Pos Target {target['x']:.2f}, {target['y']:.2f}| Dist: {distance_to_target:.2f}m | Errore ang: {angle_deg:.1f}° | Azione: {action}")
+            print(f"[DEBUG][MoveToTarget] Pos Robot: ({robot_x:.2f}, {robot_y:.2f}) θ={theta_deg:.1f}° | Sensori: L={d_left:.2f} C={d_center:.2f} R={d_right:.2f}")
         
         self._debug_tick += 1
         self.last_action = action
@@ -992,7 +1215,8 @@ def build_tree():
     target_search = Sequence("TargetSearch", memory=False, children=[
         CalculateTarget(),
         goto,
-        RecognitionValve()
+        #SecondoRetreat(),
+        RecognitionValve(),
     ])
     
     #Retry target search until valve is found (-1 = infinite retries)

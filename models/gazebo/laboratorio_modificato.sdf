@@ -241,7 +241,7 @@
         <visual name='visual'>
           <geometry>
             <box>
-              <size>0.01 0.5 0.5</size>
+              <size>0.01 0.2 0.2</size>
             </box>
           </geometry>
           <material>
@@ -252,7 +252,7 @@
         <collision name='collision'>
           <geometry>
             <box>
-              <size>0.01 0.5 0.5</size>
+              <size>0.01 0.2 0.2</size>
             </box>
           </geometry>
           <surface>
@@ -471,7 +471,7 @@
     <include>
       <uri>file:///home/ubuntu/ros2_ws/models/human</uri>
       <name>human_1</name>
-      <pose>-2.3985099792480469 -0.46080499887466431 0.026317300274968147 0 0 2.429217429092831</pose>
+      <pose>-2.3985099792480469 0.36080499887466431 0.026317300274968147 0 0 2.429217429092831</pose>
     </include>
     <light name='sun' type='directional'>
       <pose>0 0 10 0 0 0</pose>
