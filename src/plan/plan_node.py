@@ -250,6 +250,7 @@ class PlanNode(Node):
         Args:
             msg: Bool message (True = collision just happened)
         """
+        self.bb.set("bumper_event", False)
         if msg.data:  # Only set bumper when collision is detected
             self.bb.set("bumper_event", True)
             self.get_logger().warn("🔴 [BUMPER_EVENT] COLLISION EVENT RECEIVED - Bumper set to TRUE")
