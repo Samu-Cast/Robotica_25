@@ -26,15 +26,9 @@ from py_trees.common import Status, ParallelPolicy
 ####################################################################################
 KNOWN_TARGETS = {
     # Color-based targets - robot will visit these and check for valve
-<<<<<<< HEAD
-    'green': {'x': -3.35, 'y': -5.0, 'theta': -1.65},
-    'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
-    'red': {'x': -6.25, 'y': -1.35, 'theta': 3.0},  # This is actually the valve, but robot doesn't know
-=======
     'green': {'x': -3, 'y': -6.0, 'theta': -1.57}, #la x è 
     'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
     'red': {'x': -7, 'y': -2.5, 'theta': 3.14},  # This is actually the valve, but robot doesn't know
->>>>>>> giam-branch
 }
 
 # HOME/SPAWN POSITION - Will be saved automatically when robot starts
@@ -349,15 +343,6 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
 class AtTarget(py_trees.behaviour.Behaviour):
     """
         Check if robot has arrived at the target.
-<<<<<<< HEAD
-        
-        Ultra-Simplified Logic:
-        1. Check distance to target coordinates (< 0.1m)
-        2. If close, STOP and WAIT 3 seconds.
-        3. After wait, check color and mark visited.
-    """
-    ARRIVAL_THRESHOLD = 0.1  # 10cm precision
-=======
         SBAGLIATOOO
         Complete Flow:
         1. Color Detection (< 1m): Center the color in camera
@@ -373,7 +358,6 @@ class AtTarget(py_trees.behaviour.Behaviour):
     """
     COLOR_DETECTION_DISTANCE = 1.0  # Distance threshold for color detection (meters)
     BACKUP_DURATION = 8.0  # Backup duration in seconds
->>>>>>> giam-branch
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -384,10 +368,6 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("robot_position", access=py_trees.common.Access.WRITE)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("found", access=py_trees.common.Access.WRITE)
-<<<<<<< HEAD
-        
-        self.wait_start_time = None
-=======
         self.bb.register_key("bumper_event", access=py_trees.common.Access.WRITE)
         self.bb.register_key("bumper", access=py_trees.common.Access.WRITE)
         self.bb.register_key("odom_correction", access=py_trees.common.Access.WRITE)
@@ -403,7 +383,6 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self._centering_complete = False
         self._backing_up = False
         self._backup_start_time = None  
->>>>>>> giam-branch
 
     def update(self):
         target = self.bb.get("current_target")
@@ -411,12 +390,6 @@ class AtTarget(py_trees.behaviour.Behaviour):
         if not target:
             return Status.FAILURE
         
-<<<<<<< HEAD
-        # Get robot position
-        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
-        
-        # Calculate distance
-=======
         
         # Get robot position with odometry correction
         robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
@@ -428,7 +401,6 @@ class AtTarget(py_trees.behaviour.Behaviour):
             'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
         }
         
->>>>>>> giam-branch
         robot_x = robot_pos.get('x', 0.0)
         robot_y = robot_pos.get('y', 0.0)
         robot_theta = robot_pos.get('theta', 0.0)
@@ -438,27 +410,6 @@ class AtTarget(py_trees.behaviour.Behaviour):
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
-<<<<<<< HEAD
-        # Step 1: Check distance to coordinates
-        if distance_to_target > self.ARRIVAL_THRESHOLD:
-            self.wait_start_time = None  # Reset timer if we move away
-            return Status.FAILURE
-            
-        # Step 2: We are at coordinates! STOP.
-        self.bb.set("plan_action", "STOP")
-        
-        # Step 3: Wait 3 seconds
-        if self.wait_start_time is None:
-            self.wait_start_time = time.time()
-            print(f"[DEBUG][AtTarget] Arrivato a {target['name'].upper()}. Attendo 3 secondi...")
-            return Status.RUNNING
-        
-        if time.time() - self.wait_start_time < 3.0:
-            return Status.RUNNING
-            
-        # Step 4: Time expired - Process Target
-        detected_color = self.bb.get("detected_color")
-=======
         bumper1 = self.bb.get("bumper")
 
         if distance_to_target <= self.COLOR_DETECTION_DISTANCE and bumper1==True:
@@ -470,32 +421,9 @@ class AtTarget(py_trees.behaviour.Behaviour):
 
         detected_color = self.bb.get("detected_color") #colore rilevato dalla cameRA     
         print(f"[DEBUG][AtTarget] Colore visto dalla fotocamera è {detected_color}  Il bumper è {bumper_pressed}")
->>>>>>> giam-branch
         target_name = target.get("name")
         detection_zone = self.bb.get("detection_zone")  # 'left', 'center', or 'right'
         
-<<<<<<< HEAD
-        print(f"[DEBUG][AtTarget] 3 secondi passati! Dist: {distance_to_target:.2f}m | Colore: {detected_color or 'nessuno'}")
-        print(f"[DEBUG][AtTarget] Pos: ({robot_x:.2f}, {robot_y:.2f}) θ={robot_theta:.1f}°")
-        
-        # Step 5: Mark target as visited
-        visited = self.bb.get("visited_targets") or []
-        if target_name not in visited:
-            visited.append(target_name)
-            self.bb.set("visited_targets", visited)
-            print(f"[DEBUG][AtTarget] Target {target_name.upper()} marcato come visitato!")
-        
-        # Step 6: Check if this is the valve (red color)
-        if detected_color == "red":
-            print(f"[DEBUG][AtTarget] === VALVOLA TROVATA! ===")
-            self.bb.set("found", "valve")
-            return Status.SUCCESS
-        
-        # Not the valve - clear current target
-        self.bb.set("current_target", None)
-        print(f"[DEBUG][AtTarget] Non è la valvola, passo al prossimo target...")
-        return Status.SUCCESS
-=======
 
         
         # ============================================================================
@@ -576,7 +504,6 @@ class AtTarget(py_trees.behaviour.Behaviour):
         
         # No bumper - not at target yet
         return Status.FAILURE
->>>>>>> giam-branch
 
 
 class InitialRetreat(py_trees.behaviour.Behaviour):
