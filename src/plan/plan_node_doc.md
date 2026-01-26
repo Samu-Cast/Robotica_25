@@ -1,93 +1,148 @@
-# Documentazione: Plan Node (`plan_node.py`)
+# Plan Node Documentation
 
-Il **Plan Node** è il cervello strategico del robot "Charlie". Utilizza un **Behavior Tree (BT)** per prendere decisioni in tempo reale basate sui dati dei sensori e coordina l'esecuzione della missione principale: trovare e attivare una valvola.
-
-## 1. Architettura Generale
-Il nodo funge da ponte tra la percezione (`sense`) e l'azione (`act`).
-*   **Input (Iscrizioni ROS2):**
-    *   `/clock`: Sincronizzazione startup (attende che la simulazione sia attiva).
-    *   `/sense/proximity/*`: Dati dai sensori a ultrasuoni (distanze).
-    *   `/sense/odometry`: Posizione stimata del robot (`x`, `y`, `theta`).
-    *   `/sense/detection`: Rilevamenti visivi (persone, target colorati, ostacoli) dalla telecamera.
-    *   `/sense/battery`: Livello batteria.
-*   **Output (Pubblicazioni ROS2):**
-    *   `/plan/command`: Comandi di movimento testuali per il nodo Act (es. "Front", "Left", "Stop").
-    *   `/plan/signals`: Segnali di eventi importanti (es. "PersonFound", "ValveActivated").
+The **Plan Node** is the strategic brain of the Charlie robot. It uses a **Behavior Tree (BT)** for real-time decision making based on sensor data and coordinates the main mission: find and activate a red valve.
 
 ---
 
-## 2. Sincronizzazione Startup
-Il nodo **attende** che la simulazione Gazebo sia pronta prima di iniziare a inviare comandi:
+## 1. Architecture Overview
 
-1.  Si iscrive al topic `/clock` (pubblicato da Gazebo).
-2.  Quando riceve un messaggio con `clock.sec > 0`, sa che la simulazione è attiva.
-3.  Attende ulteriori **10 secondi** per permettere al robot di stabilizzarsi (spawn completo, sensori inizializzati).
-4.  Solo dopo avvia il tick del Behavior Tree a 10Hz.
+The node bridges perception (`sense`) and action (`act`).
 
-Questo previene l'invio di comandi prima che il robot sia pronto.
+### ROS2 Subscriptions
 
----
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/clock` | `Clock` | Startup synchronization with Gazebo |
+| `/sense/proximity/front` | `Range` | Front ultrasonic sensor (center) |
+| `/sense/proximity/front_left` | `Range` | Front-left ultrasonic sensor |
+| `/sense/proximity/front_right` | `Range` | Front-right ultrasonic sensor |
+| `/sense/odometry` | `Pose2D` | Robot position (`x`, `y`, `theta`) |
+| `/sense/detection` | `String` (JSON) | Visual detections from camera |
+| `/sense/detection_zone` | `String` | Color detection zone (`left`, `center`, `right`) |
+| `/sense/battery` | `Float32` | Battery level (0-100%) |
 
-## 3. Behavior Tree (Albero Comportamentale)
-La logica è strutturata gerarchicamente. Ogni nodo del BT viene eseguito (tick) a **10Hz**.
+### ROS2 Publications
 
-### Struttura Principale (`build_tree`)
-L'albero segue una **Sequenza Principale** di priorità:
-1.  **InitialRetreat**: Arretramento iniziale dalla piattaforma di spawn (eseguito una sola volta per 4 secondi).
-2.  **Battery Management**: Controllo prioritario. Se la batteria è < 20%, il robot ignora tutto il resto e torna alla base per ricaricarsi (`GoCharge`).
-3.  **Mission Loop (TargetSearch)**:
-    *   **Calcolo Target**: Sceglie il prossimo obiettivo non visitato.
-    *   **Navigazione (`GoToTarget`)**: Si muove verso il target *mentre* cerca oggetti visivamente (`Parallel`).
-    *   **Verifica**: Controlla se il target raggiunto è la valvola rossa.
-4.  **ActiveValve**: Se la valvola è trovata, la attiva.
-5.  **GoHome**: Ritorno alla piattaforma iniziale a missione conclusa.
+| Topic | Type | Description |
+|-------|------|-------------|
+| `/plan/command` | `String` | Commands for Act (`Front`, `Left`, `Right`, `Stop`, `Back`, etc.) |
+| `/plan/signals` | `String` (JSON) | Event signals (`PersonFound`, `ValveActivated`) |
 
 ---
 
-## 4. Logiche Dettagliate
+## 2. Startup Sequence
 
-### A. Selezione del Target (`CalculateTarget`)
-Il robot possiede una mappa statica di 3 punti di interesse (`KNOWN_TARGETS`: Verde, Blu, Rosso).
-*   Non naviga a caso: sceglie sempre il target **più vicino in linea d'aria** tra quelli non ancora visitati.
-*   Utilizza la posizione odometrica *corretta* (vedi punto C) per il calcolo delle distanze.
-
-### B. Navigazione e Evitamento (`MoveToTarget`)
-Gestisce il movimento verso il target selezionato.
-*   **Hysteresis**: Mantiene la direzione corrente finché l'errore angolare non supera una certa soglia, evitando oscillazioni (jitter).
-*   **Evitamento Ostacoli**:
-    *   **Ultrasuoni**: Se un ostacolo è troppo vicino (< 35cm frontale o < 25cm laterale), il robot entra in modalità `AVOID` e gira verso lo spazio libero. Dopo aver evitato, procede in avanti per ~1.5s per superare l'ostacolo prima di ricalcolare il percorso.
-    *   **Camera**: Se rileva una persona o un ostacolo visivo con alta confidenza (> 50%) e vicino (< 2m), devia preventivamente basandosi sulla zona di rilevamento (sinistra/destra).
-
-### C. Approccio di Precisione (`AtTarget`)
-Quando il robot è vicino al target (< 0.5m), attiva una macchina a stati in **5 Fasi** per l'allineamento:
-1.  **Fase 0 (Rotate & Approach)**: Ruota verso il target usando le coordinate note e avanza fino al contatto quasi fisico (< 0.6m dai sensori o < 0.15m da odometria).
-2.  **Fase 1 (Visual Centering)**: Usa la telecamera per ruotare finché l'oggetto colorato non è al centro dell'immagine.
-3.  **Fase 2 (Sensor Align)**: Usa i sensori laterali (Left/Right) per allinearsi perpendicolarmente (differenza < 5cm).
-4.  **Fase 3 (Distance Fix)**: Usa il sensore centrale per portarsi a **0.35m** di distanza.
-5.  **Fase 4 (Odom Reset)**: Una volta in posizione, ricalcola l'errore odometrico (`odom_correction`) basandosi sulle coordinate note del target.
+1. Subscribes to `/clock` (published by Gazebo)
+2. When `clock.sec > 0`, simulation is active
+3. **Waits 15 seconds** for robot stabilization
+4. Starts Behavior Tree tick at 10Hz
 
 ---
 
-## 5. Blackboard e Traduzione Comandi
-*   **Blackboard**: È la memoria condivisa del BT. I sensori scrivono qui i dati, i nodi decisionali leggono e scrivono l'azione scelta (`plan_action`).
-*   **Traduzione**: Un dizionario `ACTION_TO_COMMAND` converte le azioni logiche interne (es. `MOVE_FRONT_LEFT`) nei comandi specifici per il driver dei motori (es. `"FrontLeft"`).
+## 3. Target Configuration
+
+Targets are defined in `behaviors.py`:
+
+```python
+KNOWN_TARGETS = {
+    'green': {'x': -3.2, 'y': -5.5, 'theta': -1.57},
+    'blue': {'x': 0.0, 'y': -4.0, 'theta': 0.0},
+    'red': {'x': -6.25, 'y': -2.0, 'theta': 3.14},  # Valve
+}
+```
+
+The robot does **not** know which target is the valve - it must visit each one.
 
 ---
 
-## 6. Riepilogo Classi
+## 4. Behavior Tree Structure
 
-| Classe | Tipo | Descrizione |
-|--------|------|-------------|
-| `BatteryCheck` | Condition | Verifica batteria > 20% |
-| `GoCharge` | Action | Naviga verso la stazione di ricarica |
-| `CalculateTarget` | Action | Seleziona il prossimo target non visitato |
-| `AtTarget` | Action | Allineamento preciso in 5 fasi |
-| `InitialRetreat` | Action | Arretramento iniziale (4s) |
-| `MoveToTarget` | Action | Navigazione con evitamento ostacoli |
-| `SearchObj` | Action | Aggiorna `found` in base ai rilevamenti |
-| `RecognitionPerson/Obstacle/Valve` | Condition | Controlla il valore di `found` |
-| `SignalPerson` | Action | Aggiunge "PersonFound" ai segnali |
-| `GoAroundP/O` | Action | Evita persona/ostacolo basandosi sulla zona |
-| `ActiveValve` | Action | Attiva la valvola, missione completata |
-| `GoHome` | Action | Ritorna alla posizione iniziale |
+### Main Sequence
 
+1. **InitialRetreat** (~1m): Backs away from spawn platform using odometry
+2. **Battery Management**: If battery < 20%, returns to charge
+3. **Target Loop** (repeats until valve found):
+   - `CalculateTarget`: Selects closest unvisited target
+   - `GoToTarget`: Navigates with obstacle avoidance
+   - `RecognitionValve`: Checks if target is the red valve
+4. **ActiveValve**: Activates valve, mission complete
+5. **GoHome**: Returns to spawn platform
+
+---
+
+## 5. Key Behaviors
+
+### A. Target Selection (`CalculateTarget`)
+
+- Uses odometry with correction offset
+- Selects **closest unvisited target** by Euclidean distance
+- Maintains current target until marked as visited
+- Returns `FAILURE` when all targets visited
+
+### B. Navigation (`MoveToTarget`)
+
+**Obstacle Avoidance** (ultrasonic only):
+- Front sensor < 0.5m → avoid
+- Side sensors < 0.3m → avoid
+- Uses `calculate_best_direction()` for smart avoidance
+
+**Navigation** (hysteresis-based):
+- Well aligned (< 11°) → `MOVE_FORWARD`
+- Large error (> 23°) → `MOVE_FRONT_LEFT/RIGHT`
+- Medium error → maintain previous action
+
+### C. Target Approach (`AtTarget`)
+
+**Phase 1: Color Detection & Centering** (< 1m from target)
+- Color detected but not centered → `MOVE_FRONT_LEFT/RIGHT` (gentle correction)
+- Color centered → `MOVE_FORWARD` (straight approach)
+
+**Phase 2: Proximity Detection**
+- Front sensor < 0.15m → target reached
+- Mark target as visited
+- Check if color is red (valve)
+
+> **Note**: Uses proximity sensors instead of bumper to avoid physical collision and odometry drift.
+
+---
+
+## 6. Command Translation
+
+```python
+ACTION_TO_COMMAND = {
+    'MOVE_FORWARD': 'Front',
+    'MOVE_BACKWARD': 'Back',
+    'TURN_LEFT': 'Left',
+    'TURN_RIGHT': 'Right',
+    'MOVE_FRONT_LEFT': 'FrontLeft',
+    'MOVE_FRONT_RIGHT': 'FrontRight',
+    'STOP': 'Stop',
+}
+```
+
+---
+
+## 7. Logging Format
+
+All logs use bracketed prefixes without emojis:
+
+```
+[PLAN] HOME SAVED @ (0.00, 0.00)
+[PLAN] RETREAT START (1.0m)...
+[PLAN] RETREAT: 50% (0.50m)
+[PLAN] RETREAT COMPLETE (1.02m) - Navigation started
+[PLAN] NEW TARGET: BLUE @ (0.00, -4.00) | Dist: 4.02m
+[PLAN] NAV -> BLUE | Dist: 3.50m | Ang: -15deg | MOVE_FORWARD
+[PLAN] COLOR DETECTED: BLUE at BLUE (dist: 0.85m)
+[PLAN] COLOR CENTERED - advancing to BLUE...
+[PLAN] TARGET REACHED: BLUE (sensor: 0.12m) | Color: blue
+[AVOID] ULTRASONIC: C=0.42<0.5 -> TURN_LEFT
+[AVOID] OBSTACLE CLEARED - recovery (1/3)
+```
+
+---
+
+## 8. Files
+
+- [behaviors.py](file:///home/salinux/Robotica/Progetto/Robotica_25/src/plan/behaviors.py) - BT node definitions
+- [plan_node.py](file:///home/salinux/Robotica/Progetto/Robotica_25/src/plan/plan_node.py) - ROS2 node

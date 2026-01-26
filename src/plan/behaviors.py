@@ -26,9 +26,9 @@ from py_trees.common import Status, ParallelPolicy
 ####################################################################################
 KNOWN_TARGETS = {
     # Color-based targets - robot will visit these and check for valve
-    'green': {'x': -3, 'y': -6.0, 'theta': -1.57}, #la x è 
-    'blue': {'x': 0.35, 'y': -4.0, 'theta': 0.0},
-    'red': {'x': -7, 'y': -2.5, 'theta': 3.14},  # This is actually the valve, but robot doesn't know
+    'green': {'x': -3.2, 'y': -5.5, 'theta': -1.57}, #la x è 
+    'blue': {'x': 0.0, 'y': -4.0, 'theta': 0.0},
+    'red': {'x': -6.25, 'y': -2.0, 'theta': 3.14},  # This is actually the valve, but robot doesn't know
 }
 
 # HOME/SPAWN POSITION - Will be saved automatically when robot starts
@@ -285,16 +285,12 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
         self._last_logged_target = None  #Evita spam di log
 
     def update(self):
-        
-        print(f"[DEBUG]                                              [CalculateTarget] ")
-
         #1. Check if we already have a valid pending target (Persistence)
         current = self.bb.get("current_target")
         visited = self.bb.get("visited_targets") or []
         
         if current and current['name'] not in visited:
              #Keep current target until visited
-             print(f"IL TARGET CORRENTE è {current['name']}")
              return Status.SUCCESS
              
         robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
@@ -321,43 +317,38 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
                     closest_data = data
         
         if closest_name:
-            print(f"Sto cambiando target verso {closest_name} ")
             self.bb.set("current_target", {
                 'name': closest_name,
                 'x': closest_data['x'],
                 'y': closest_data['y'],
                 'theta': closest_data['theta']
             })
-            #DEBUG: Log nuovo target selezionato
+            # Log only when target changes
             if closest_name != self._last_logged_target:
-                print(f"[DEBUG][CalculateTarget] Nuovo target: {closest_name.upper()} @ ({closest_data['x']:.2f}, {closest_data['y']:.2f}) | Distanza: {math.sqrt(closest_dist):.2f}m")
-                print(f"[DEBUG][CalculateTarget] Posizione robot: ({robot_pos['x']:.2f}, {robot_pos['y']:.2f}) | Visitati: {visited}")
+                print(f"[PLAN] NEW TARGET: {closest_name.upper()} @ ({closest_data['x']:.2f}, {closest_data['y']:.2f}) | Dist: {math.sqrt(closest_dist):.2f}m")
                 self._last_logged_target = closest_name
             return Status.SUCCESS
         
-        #DEBUG: Tutti i target visitati
-        print(f"[DEBUG][CalculateTarget] Tutti i target visitati: {visited}")
+        # All targets visited
+        print(f"[PLAN] ALL TARGETS VISITED: {visited}")
         return Status.FAILURE
 
 
 class AtTarget(py_trees.behaviour.Behaviour):
     """
         Check if robot has arrived at the target.
-        SBAGLIATOOO
+        
         Complete Flow:
         1. Color Detection (< 1m): Center the color in camera
            - If left/right: turn until centered
            - Once centered: go straight (CHARGE_COLOR)
-        2. Collision Detection (bumper=True):
-           - Check if valve is red (SUCCESS if found)
-           - If NOT red: Enter backup phase
-        3. Backup Phase (if not valve):
-           - Reverse for 6 seconds (BACK command)
+        2. Proximity Detection (front sensor < 0.15m):
+           - Check if valve is red
            - Mark target as visited
-           - Pass to next target
+           - Stop and proceed to next target
     """
     COLOR_DETECTION_DISTANCE = 1.0  # Distance threshold for color detection (meters)
-    BACKUP_DURATION = 8.0  # Backup duration in seconds
+    PROXIMITY_THRESHOLD = 0.15  # Distance to consider target reached (meters)
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -368,28 +359,18 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("robot_position", access=py_trees.common.Access.WRITE)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("found", access=py_trees.common.Access.WRITE)
-        self.bb.register_key("bumper_event", access=py_trees.common.Access.WRITE)
-        self.bb.register_key("bumper", access=py_trees.common.Access.WRITE)
         self.bb.register_key("odom_correction", access=py_trees.common.Access.WRITE)
         self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
-        
-        self.start_time = None #per contare il tempo di retreat
-        self.duration = 15.0  # Seconds to retreat
-        self._logged_start = False #serve per
-        self._backup_start_time = None  # For backup phase timing
+        self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
 
         # Internal state
         self._color_detected_logged = False 
         self._centering_complete = False
-        self._backing_up = False
-        self._backup_start_time = None  
 
     def update(self):
         target = self.bb.get("current_target")
-        print(f"[DEBUG]                                              [AT TARGET] Verso {target['name']}")
         if not target:
             return Status.FAILURE
-        
         
         # Get robot position with odometry correction
         robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
@@ -403,106 +384,83 @@ class AtTarget(py_trees.behaviour.Behaviour):
         
         robot_x = robot_pos.get('x', 0.0)
         robot_y = robot_pos.get('y', 0.0)
-        robot_theta = robot_pos.get('theta', 0.0)
         
-        # Calculate distance to target (for reference/logging)
+        # Calculate distance to target
         dx = target['x'] - robot_x
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
-        bumper1 = self.bb.get("bumper")
-
-        if distance_to_target <= self.COLOR_DETECTION_DISTANCE and bumper1==True:
-            bumper_pressed = self.bb.get("bumper_event")
-        else:
-            bumper_pressed = False
+        # Get proximity sensor reading
+        front_distance = self.bb.get("distance_center") or 999.0
         
-        print(f"Bumper1 è {bumper1} -----------   il bumper_pressed è {bumper_pressed}")
-
-        detected_color = self.bb.get("detected_color") #colore rilevato dalla cameRA     
-        print(f"[DEBUG][AtTarget] Colore visto dalla fotocamera è {detected_color}  Il bumper è {bumper_pressed}")
+        detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
-        detection_zone = self.bb.get("detection_zone")  # 'left', 'center', or 'right'
-        
-
+        detection_zone = self.bb.get("detection_zone")
         
         # ============================================================================
         # PHASE 1: COLOR DETECTION & CENTERING (< 1 meter)
         # ============================================================================
-        if detected_color and distance_to_target <= self.COLOR_DETECTION_DISTANCE and bumper_pressed == False:
+        if detected_color and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
+            # Log once when color first detected
             if not self._color_detected_logged:
-                print(f"[DEBUG][AtTarget] === COLOR DETECTED === {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
+                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
                 self._color_detected_logged = True 
                 self._centering_complete = False
             
-            # PHASE 1a: Center color in camera frame
-            if detection_zone and detection_zone != 'center':
-                # Color not centered - rotate to center it
-                if detection_zone == 'left':
-                    print(f"[DEBUG][AtTarget] Color LEFT → TURN_LEFT to center")
-                    self.bb.set("plan_action", "TURN_LEFT")
-                elif detection_zone == 'right':
-                    print(f"[DEBUG][AtTarget] Color RIGHT → TURN_RIGHT to center")
-                    self.bb.set("plan_action", "TURN_RIGHT")
-                
-                return Status.RUNNING
+            # Check if we've reached the target via proximity
+            if front_distance < self.PROXIMITY_THRESHOLD:
+                # Target reached via proximity - proceed to phase 2
+                pass
             else:
-                # PHASE 1b: Color is centered - charge toward it
-                if not self._centering_complete:
-                    print(f"[DEBUG][AtTarget] Color Centrato -- Verso il muro...")
-                    self._centering_complete = True
-                
-                self.bb.set("plan_action", "CHARGE_COLOR")
-                
-                return Status.RUNNING
+                # PHASE 1a: Center color in camera frame
+                # Use gentle turning (MOVE_FRONT_LEFT/RIGHT) to avoid oscillation
+                if detection_zone and detection_zone != 'center':
+                    if detection_zone == 'left':
+                        self.bb.set("plan_action", "MOVE_FRONT_LEFT")
+                    elif detection_zone == 'right':
+                        self.bb.set("plan_action", "MOVE_FRONT_RIGHT")
+                    self._centering_complete = False
+                    return Status.RUNNING
+                else:
+                    # PHASE 1b: Color is centered - charge straight toward it
+                    if not self._centering_complete:
+                        print(f"[PLAN] COLOR CENTERED - advancing to {target_name.upper()}...")
+                        self._centering_complete = True
+                    
+                    self.bb.set("plan_action", "MOVE_FORWARD")
+                    return Status.RUNNING
         
         # Reset centering when color is lost or too far
         if not detected_color or distance_to_target > self.COLOR_DETECTION_DISTANCE:
             self._color_detected_logged = False
             self._centering_complete = False
         
-        if bumper_pressed and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
-            print(f"[DEBUG][AtTarget] 💥 COLLISIONEEEEEEE! Bumper attivato a {target_name.upper()}")
-            print(f"[DEBUG][AtTarget] Posizione: ({robot_x:.2f}, {robot_y:.2f}) | Colore: {detected_color or 'NONE'}")           
+        # ============================================================================
+        # PHASE 2: PROXIMITY DETECTION - Target reached!
+        # ============================================================================
+        if front_distance < self.PROXIMITY_THRESHOLD and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
+            print(f"[PLAN] TARGET REACHED: {target_name.upper()} (sensor: {front_distance:.2f}m) | Color: {detected_color or 'N/A'}")
             
             if detected_color == "red":
                 self.bb.set("found", "valve")
-            
+                print(f"[PLAN] VALVE FOUND!")
             
             # Mark target as visited
             visited = self.bb.get("visited_targets") or []
             if target_name not in visited:
                 visited.append(target_name)
                 self.bb.set("visited_targets", visited)
-                print(f"[DEBUG][AtTarget] Target {target_name.upper()} marcato come VISITED")
 
             self.bb.set("plan_action", "STOP")
-                
-
+            
             # Reset state for next target
             self.bb.set("current_target", None)
-            self.bb.set("bumper_event", False)  # Reset bumper event for next target
-            print(f"Dopo la collisione, resetto il bumper e il target corrente è {self.bb.get('bumper_event')}")    
-            self._backing_up = False
-            self._backup_start_time = None
             self._color_detected_logged = False
             self._centering_complete = False
-            print(f"Sto facendo SUCCESS finito AtTarget, dovrei anadare in SecondoRetreat")
-            self.bb.set("plan_action", "STOP")
-
-            print(f"[DEBUG][AtTarget] Correcting odometry after visit to {target_name.upper()}")
-            
-            print(f"[DEBUG][AtTarget] ✅✅✅ CORDINATE ROBOT {self.bb.get('robot_position')} ")
-            print(f"[DEBUG][AtTarget] ✅✅✅ CORDINATE TARGET {target} ")
-            print(f"[DEBUG][AtTarget] ✅✅✅ ODOMETRIA {self.bb.get('odom_correction')} ")
-            
-            print(f"[DEBUG][AtTarget] ❌❌❌ CORDINATE ROBOT {self.bb.get('robot_position')} ")
-            print(f"[DEBUG][AtTarget] ❌❌❌ CORDINATE TARGET {target} ")
-            print(f"[DEBUG][AtTarget] ❌❌❌ ODOMETRIA {self.bb.get('odom_correction')} ")
             
             return Status.SUCCESS
         
-        # No bumper - not at target yet
+        # Not at target yet
         return Status.FAILURE
 
 
@@ -510,8 +468,11 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
     """
     Step 1: Move backward from the platform at startup.
     Saves initial spawn position before retreating.
+    Retreats approximately 1 meter using odometry.
     Runs only once until completion.
     """
+    RETREAT_DISTANCE = 1.0  # meters to retreat
+    
     def __init__(self):
         super().__init__(name="InitialRetreat")
         self.bb = self.attach_blackboard_client(name=self.name)
@@ -520,18 +481,19 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         self.bb.register_key("startup_complete", access=py_trees.common.Access.READ)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         self.bb.register_key("home_position", access=py_trees.common.Access.WRITE)
-        self.start_time = None
-        self.duration = 20.0  # Seconds to retreat
-        self._logged_start = False
+        self._start_position = None
         self._home_saved = False
+        self._last_logged_quarter = -1  # Track which quarter we last logged (0, 1, 2, 3)
     
     def update(self):
         if self.bb.get("startup_complete"):
             return Status.SUCCESS
         
+        # Get current robot position
+        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        
         # FIRST: Save initial position as home BEFORE moving
         if not self._home_saved:
-            robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
             home_position = {
                 'x': robot_pos['x'],
                 'y': robot_pos['y'],
@@ -539,27 +501,37 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
             }
             self.bb.set("home_position", home_position)
             self._home_saved = True
-            print(f"[DEBUG][InitialRetreat] HOME salvata: ({home_position['x']:.2f}, {home_position['y']:.2f}) theta={math.degrees(home_position['theta']):.1f}°")
-            
-        if self.start_time is None:
-            self.start_time = time.time()
-            # DEBUG: Log inizio retreat
-            print(f"[DEBUG][InitialRetreat] Inizio arretramento dalla piattaforma ({self.duration}s)...")
-            
-        elapsed = time.time() - self.start_time
+            self._start_position = home_position.copy()
+            print(f"[PLAN] HOME SAVED @ ({home_position['x']:.2f}, {home_position['y']:.2f})")
+            print(f"[PLAN] RETREAT START ({self.RETREAT_DISTANCE}m)...")
         
-        if elapsed < self.duration:
-            self.bb.set("plan_action", "MOVE_BACKWARD")
-            # DEBUG: Log progresso ogni secondo
-            if int(elapsed) > int(elapsed - 0.1) and not self._logged_start:
-                print(f"[DEBUG][InitialRetreat] Arretramento... {elapsed:.1f}s / {self.duration}s")
-            return Status.RUNNING
-        else:
-            self.bb.set("plan_action", "STOP")
-            self.bb.set("startup_complete", True)
-            # DEBUG: Log completamento
-            print(f"[DEBUG][InitialRetreat] Arretramento completato! Inizio navigazione...")
-            return Status.SUCCESS
+        # Calculate distance traveled from start position
+        if self._start_position:
+            dx = robot_pos['x'] - self._start_position['x']
+            dy = robot_pos['y'] - self._start_position['y']
+            distance_traveled = math.sqrt(dx**2 + dy**2)
+            
+            if distance_traveled < self.RETREAT_DISTANCE:
+                self.bb.set("plan_action", "MOVE_BACKWARD")
+                
+                # Log at 25%, 50%, 75% progress (4 messages total including start and end)
+                progress = distance_traveled / self.RETREAT_DISTANCE
+                current_quarter = int(progress * 4)  # 0, 1, 2, 3
+                if current_quarter > self._last_logged_quarter and current_quarter < 4:
+                    pct = current_quarter * 25
+                    print(f"[PLAN] RETREAT: {pct}% ({distance_traveled:.2f}m)")
+                    self._last_logged_quarter = current_quarter
+                
+                return Status.RUNNING
+            else:
+                self.bb.set("plan_action", "STOP")
+                self.bb.set("startup_complete", True)
+                print(f"[PLAN] RETREAT COMPLETE ({distance_traveled:.2f}m) - Navigation started")
+                return Status.SUCCESS
+        
+        # Fallback: keep moving backward if start position not set
+        self.bb.set("plan_action", "MOVE_BACKWARD")
+        return Status.RUNNING
 
 
 class SecondoRetreat(py_trees.behaviour.Behaviour):
@@ -683,62 +655,37 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         if current_action == "CHARGE_COLOR":
             #In charge mode - ignore all obstacles, go straight
             self.bb.set("plan_action", "MOVE_FORWARD")
-            if self._debug_tick % 20 == 0:
-                print(f"[DEBUG][MoveToTarget] MODALITÀ CARICA COLORE ATTIVA - Vado dritto verso {target['name'].upper()}!")
+            if self._debug_tick % 30 == 0:
+                print(f"[AVOID] CHARGE_COLOR active - ignoring obstacles, straight to {target['name'].upper()}")
             self._debug_tick += 1
             return Status.RUNNING
         
         #LOGIC START
         
-        #A. CAMERA DETECTION (person/obstacle from Sense module)
-        found = self.bb.get("found")
-        detection_zone = self.bb.get("detection_zone")
-        detection_distance = self.bb.get("detection_distance") or 999.0
-        detection_confidence = self.bb.get("detection_confidence") or 0.0
+        # OBSTACLE AVOIDANCE - Only based on ultrasonic sensors
+        # Thresholds: Front < 0.5m, Lateral < 0.3m
+        FRONT_OBSTACLE_DIST = 0.5
+        SIDE_OBSTACLE_DIST = 0.3
         
-        #Only react to camera detections if:
-        #1. It's a person or obstacle
-        #2. It's close enough (< 2.0m estimated)
-        #3. Confidence is high enough (> 0.5)
-        #NOTE: We check even while avoiding - keep turning until obstacle is out of view
-        CAMERA_AVOID_THRESHOLD = 1.5  #meters - react earlier (safety margin)
-        
-        obstacle_visible = (found in ['person', 'obstacle'] 
-                           and detection_distance < CAMERA_AVOID_THRESHOLD 
-                           and detection_confidence > 0.4)
-        
-        if obstacle_visible:
-            #Obstacle is visible - keep turning to avoid it
-            self.avoiding = True
-            self.recovery_steps = 0  #Reset recovery (obstacle still visible)
-            
-            #Turn opposite to detection zone
-            if detection_zone == 'left':
-                action = 'TURN_RIGHT'
-            elif detection_zone == 'right':
-                action = 'TURN_LEFT'
-            else:
-                #Center or unknown - choose based on ultrasonic sensors
-                action = 'TURN_LEFT' if d_left > d_right else 'TURN_RIGHT'
-            
-            if self._debug_tick % 5 == 0:
-                print(f"[DEBUG][MoveToTarget] {found.upper()} visibile! Continuo a girare... Zona: {detection_zone} → {action}")
-            self.bb.set("plan_action", action)
-            self._debug_tick += 1
-            return Status.RUNNING
-        
-        #B. ULTRASONIC OBSTACLE DETECTION
-        is_blocked = (d_center < OBSTACLE_DIST or d_left < OBSTACLE_DIST or d_right < OBSTACLE_DIST)
+        is_blocked = (d_center < FRONT_OBSTACLE_DIST or 
+                      d_left < SIDE_OBSTACLE_DIST or 
+                      d_right < SIDE_OBSTACLE_DIST)
         
         if is_blocked:
+            was_avoiding = self.avoiding
             self.avoiding = True
             self.recovery_steps = 0
             
-            #Use calculate_best_direction for smart avoidance
-            action = calculate_best_direction(d_left, d_center, d_right, OBSTACLE_DIST)
+            # Use calculate_best_direction for smart avoidance
+            action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
             
-            if self._debug_tick % 10 == 0:
-                print(f"[DEBUG][MoveToTarget] OSTACOLO ultrasuoni! L={d_left:.2f} C={d_center:.2f} R={d_right:.2f} → {action}")
+            # Log on first detection or periodically
+            if not was_avoiding or self._debug_tick % 10 == 0:
+                blocked_sensors = []
+                if d_left < SIDE_OBSTACLE_DIST: blocked_sensors.append(f"L={d_left:.2f}<{SIDE_OBSTACLE_DIST}")
+                if d_center < FRONT_OBSTACLE_DIST: blocked_sensors.append(f"C={d_center:.2f}<{FRONT_OBSTACLE_DIST}")
+                if d_right < SIDE_OBSTACLE_DIST: blocked_sensors.append(f"R={d_right:.2f}<{SIDE_OBSTACLE_DIST}")
+                print(f"[AVOID] ULTRASONIC: {' '.join(blocked_sensors)} -> {action}")
             
             self.last_action = action
             self.bb.set("plan_action", action)
@@ -748,9 +695,9 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         #C. RECOVERY (Post-Avoidance)
         if self.avoiding:
             #Obstacle is cleared, but we need to move away from it before turning back
-            if self.recovery_steps < 3:  #~0.3 seconds - quick recovery then recalculate
+            if self.recovery_steps < 3:
                 if self.recovery_steps == 0:
-                    print(f"[DEBUG][MoveToTarget] Recupero post-ostacolo: avanzo per superare...")
+                    print(f"[AVOID] OBSTACLE CLEARED - recovery ({self.recovery_steps+1}/3)")
                 action = "MOVE_FORWARD"
                 self.recovery_steps += 1
                 self.bb.set("plan_action", action)
@@ -758,17 +705,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             else:
                 #Recovery done, recalculate path from new position
                 self.avoiding = False
-                
-                #Calculate new distance and angle from current position
-                new_dx = target['x'] - robot_pos.get('x', 0.0)
-                new_dy = target['y'] - robot_pos.get('y', 0.0)
-                new_distance = math.sqrt(new_dx**2 + new_dy**2)
-                new_angle = math.atan2(new_dy, new_dx)
-                angle_error = math.degrees(new_angle - robot_pos.get('theta', 0.0))
-                
-                print(f"[DEBUG][MoveToTarget] Recupero completato! RICALCOLO PERCORSO...")
-                print(f"[DEBUG][MoveToTarget] Nuova posizione: ({robot_pos.get('x', 0.0):.2f}, {robot_pos.get('y', 0.0):.2f})")
-                print(f"[DEBUG][MoveToTarget] Target {target['name'].upper()}: distanza={new_distance:.2f}m, errore angolare={angle_error:.1f}°")
+                print(f"[AVOID] RECOVERY COMPLETE - resuming navigation to {target['name'].upper()}")
         
         #D. NAVIGATION (Hysteresis)
         #Calculate angle error to target
@@ -809,12 +746,10 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
                 #Was doing something else (avoidance) - pick appropriate
                 action = 'MOVE_FORWARD'
         
-        #DEBUG: Log navigazione periodico (ogni 20 tick = 2 secondi)
-        if self._debug_tick % 20 == 0:
+        # Log navigation status every 5 seconds (50 ticks at 10Hz)
+        if self._debug_tick % 50 == 0:
             angle_deg = math.degrees(angle_diff)
-            theta_deg = math.degrees(robot_theta)
-            print(f"[DEBUG][MoveToTarget] NAV → {target['name'].upper()} Pos Target {target['x']:.2f}, {target['y']:.2f}| Dist: {distance_to_target:.2f}m | Errore ang: {angle_deg:.1f}° | Azione: {action}")
-            print(f"[DEBUG][MoveToTarget] Pos Robot: ({robot_x:.2f}, {robot_y:.2f}) θ={theta_deg:.1f}° | Sensori: L={d_left:.2f} C={d_center:.2f} R={d_right:.2f}")
+            print(f"[PLAN] NAV -> {target['name'].upper()} | Dist: {distance_to_target:.2f}m | Ang: {angle_deg:+.0f}deg | {action}")
         
         self._debug_tick += 1
         self.last_action = action

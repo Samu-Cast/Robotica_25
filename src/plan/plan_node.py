@@ -135,11 +135,11 @@ class PlanNode(Node):
         if not self._robot_ready and self._startup_timer is None:
             #Check if simulation has started (time > 0)
             if msg.clock.sec > 0 or msg.clock.nanosec > 0:
-                self.get_logger().info(f'Simulation started (time={msg.clock.sec}s)! Waiting 20s for stabilization...')
-                self._startup_timer = self.create_timer(60.0, self._start_behavior_tree)
+                self.get_logger().info(f'Simulation started (time={msg.clock.sec}s)! Waiting 15s for stabilization...')
+                self._startup_timer = self.create_timer(15.0, self._start_behavior_tree)
     
     def _start_behavior_tree(self):
-        """Called after clock detected + 20 seconds delay."""
+        """Called after clock detected + 15 seconds delay."""
         if self._startup_timer:
             self._startup_timer.cancel()
             self._startup_timer = None
