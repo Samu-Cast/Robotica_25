@@ -28,7 +28,7 @@ KNOWN_TARGETS = {
     # Color-based targets - robot will visit these and check for valve
     'green': {'x': -3.2, 'y': -5.5, 'theta': -1.57}, #la x è 
     'blue': {'x': 0.0, 'y': -4.0, 'theta': 0.0},
-    'red': {'x': -6.25, 'y': -2.0, 'theta': 3.14},  # This is actually the valve, but robot doesn't know
+    'red': {'x': -6.5, 'y': -1.5, 'theta': 3.14},  # This is actually the valve, but robot doesn't know
 }
 
 # HOME/SPAWN POSITION - Will be saved automatically when robot starts
@@ -348,7 +348,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
            - Stop and proceed to next target
     """
     COLOR_DETECTION_DISTANCE = 1.0  # Distance threshold for color detection (meters)
-    PROXIMITY_THRESHOLD = 0.15  # Distance to consider target reached (meters)
+    PROXIMITY_THRESHOLD = 0.20  # Distance to consider target reached (meters)
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -362,6 +362,8 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("odom_correction", access=py_trees.common.Access.WRITE)
         self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
 
         # Internal state
         self._color_detected_logged = False 
@@ -390,56 +392,28 @@ class AtTarget(py_trees.behaviour.Behaviour):
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
-        # Get proximity sensor reading
-        front_distance = self.bb.get("distance_center") or 999.0
+        # Get all 3 proximity sensor readings
+        d_left = self.bb.get("distance_left") or 999.0
+        d_center = self.bb.get("distance_center") or 999.0
+        d_right = self.bb.get("distance_right") or 999.0
+        
+        # Check if ANY sensor detects target close enough
+        min_distance = min(d_left, d_center, d_right)
+        target_close = min_distance < self.PROXIMITY_THRESHOLD
         
         detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
         detection_zone = self.bb.get("detection_zone")
         
-        # ============================================================================
-        # PHASE 1: COLOR DETECTION & CENTERING (< 1 meter)
-        # ============================================================================
-        if detected_color and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
-            # Log once when color first detected
-            if not self._color_detected_logged:
-                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
-                self._color_detected_logged = True 
-                self._centering_complete = False
-            
-            # Check if we've reached the target via proximity
-            if front_distance < self.PROXIMITY_THRESHOLD:
-                # Target reached via proximity - proceed to phase 2
-                pass
-            else:
-                # PHASE 1a: Center color in camera frame
-                # Use gentle turning (MOVE_FRONT_LEFT/RIGHT) to avoid oscillation
-                if detection_zone and detection_zone != 'center':
-                    if detection_zone == 'left':
-                        self.bb.set("plan_action", "MOVE_FRONT_LEFT")
-                    elif detection_zone == 'right':
-                        self.bb.set("plan_action", "MOVE_FRONT_RIGHT")
-                    self._centering_complete = False
-                    return Status.RUNNING
-                else:
-                    # PHASE 1b: Color is centered - charge straight toward it
-                    if not self._centering_complete:
-                        print(f"[PLAN] COLOR CENTERED - advancing to {target_name.upper()}...")
-                        self._centering_complete = True
-                    
-                    self.bb.set("plan_action", "MOVE_FORWARD")
-                    return Status.RUNNING
-        
-        # Reset centering when color is lost or too far
-        if not detected_color or distance_to_target > self.COLOR_DETECTION_DISTANCE:
-            self._color_detected_logged = False
-            self._centering_complete = False
+        # Check if detected color matches the current target
+        color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
         
         # ============================================================================
-        # PHASE 2: PROXIMITY DETECTION - Target reached!
+        # EMERGENCY STOP: If very close to wall AND correct color detected
         # ============================================================================
-        if front_distance < self.PROXIMITY_THRESHOLD and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
-            print(f"[PLAN] TARGET REACHED: {target_name.upper()} (sensor: {front_distance:.2f}m) | Color: {detected_color or 'N/A'}")
+        if target_close and color_matches_target:
+            # TARGET REACHED - stop immediately
+            print(f"[PLAN] TARGET REACHED: {target_name.upper()} (sensor: {min_distance:.2f}m) | Color: {detected_color}")
             
             if detected_color == "red":
                 self.bb.set("found", "valve")
@@ -460,6 +434,39 @@ class AtTarget(py_trees.behaviour.Behaviour):
             
             return Status.SUCCESS
         
+        # ============================================================================
+        # PHASE 1: COLOR DETECTION & CENTERING (< 1 meter, correct color only)
+        # ============================================================================
+        if color_matches_target and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
+            # Log once when color first detected
+            if not self._color_detected_logged:
+                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
+                self._color_detected_logged = True 
+                self._centering_complete = False
+            
+            # PHASE 1a: Center color in camera frame
+            # Use gentle turning (MOVE_FRONT_LEFT/RIGHT) to avoid oscillation
+            if detection_zone and detection_zone != 'center':
+                if detection_zone == 'left':
+                    self.bb.set("plan_action", "MOVE_FRONT_LEFT")
+                elif detection_zone == 'right':
+                    self.bb.set("plan_action", "MOVE_FRONT_RIGHT")
+                self._centering_complete = False
+                return Status.RUNNING
+            else:
+                # Color is centered - advance straight
+                if not self._centering_complete:
+                    print(f"[PLAN] COLOR CENTERED - advancing to {target_name.upper()}...")
+                    self._centering_complete = True
+                
+                self.bb.set("plan_action", "MOVE_FORWARD")
+                return Status.RUNNING
+        
+        # Reset centering when color is lost or too far
+        if not color_matches_target or distance_to_target > self.COLOR_DETECTION_DISTANCE:
+            self._color_detected_logged = False
+            self._centering_complete = False
+        
         # Not at target yet
         return Status.FAILURE
 
@@ -471,7 +478,7 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
     Retreats approximately 1 meter using odometry.
     Runs only once until completion.
     """
-    RETREAT_DISTANCE = 1.0  # meters to retreat
+    RETREAT_DISTANCE = 0.5  # meters to retreat
     
     def __init__(self):
         super().__init__(name="InitialRetreat")
@@ -584,18 +591,24 @@ class SecondoRetreat(py_trees.behaviour.Behaviour):
 
 class MoveToTarget(py_trees.behaviour.Behaviour):
     """
-        Advanced Navigation with Hysteresis & Obstacle Recovery.
+        Navigate towards the target with obstacle avoidance.
+        Uses Hysteresis-based navigation to avoid oscillation.
         
-        Logic:
-        1. Check Ultrasonics (< 0.5m)
-        - If blocked: Enter AVOIDANCE mode (turn to open space).
-        2. Check AVOIDANCE recovery
+        Logic Flow:
+        1. Obstacle Detection (Ultrasonic)
+        - If any sensor blocked: Turn away from obstacle.
+        - Use calculate_best_direction() for smart choice.
+        2. Recovery (Post-Avoidance)
         - If was avoiding and now clear: Move Forward blindly (1-2s) to pass obstacle.
-        3. Navigation (Target)
+        3. Visual Search (when near target position)
+        - If close to target position but color not seen: Rotate to scan.
+        4. Navigation (Target)
         - If clear: Calculate angle error.
         - Only change direction if error is large (> threshold).
         - Maintain current direction otherwise (Hysteresis).
     """
+    SEARCH_DISTANCE =  0.5 # Start visual search when within this distance (meters)
+    
     def __init__(self):
         super().__init__(name="MoveToTarget")
         self.bb = self.attach_blackboard_client(name=self.name)
@@ -615,12 +628,15 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
         self.bb.register_key("detection_distance", access=py_trees.common.Access.READ)
         self.bb.register_key("detection_confidence", access=py_trees.common.Access.READ)
+        self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
         
         #Internal State
         self.avoiding = False
         self.recovery_steps = 0
         self.last_action = "STOP"
         self._debug_tick = 0  #Contatore per logging periodico
+        self._search_ticks = 0  # Count ticks while searching
+        self._search_logged = False
 
     def update(self):
         #Get Target (Persistent)
@@ -646,6 +662,20 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
             'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
         }
+        
+        # Calculate distance to target (odometry-based)
+        robot_x = robot_pos.get('x', 0.0)
+        robot_y = robot_pos.get('y', 0.0)
+        robot_theta = robot_pos.get('theta', 0.0)
+        dx = target['x'] - robot_x
+        dy = target['y'] - robot_y
+        distance_to_target = math.sqrt(dx**2 + dy**2)
+        
+        # Get detected color for visual guidance
+        detected_color = self.bb.get("detected_color")
+        target_name = target.get("name")
+        color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
+        detection_zone = self.bb.get("detection_zone")
         
         #Thresholds
         OBSTACLE_DIST = 0.5
@@ -694,28 +724,68 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
 
         #C. RECOVERY (Post-Avoidance)
         if self.avoiding:
-            #Obstacle is cleared, but we need to move away from it before turning back
-            if self.recovery_steps < 3:
+            # Check if obstacle is still detected - if so, stay in avoidance mode
+            still_blocked = (d_center < FRONT_OBSTACLE_DIST * 1.2 or 
+                            d_left < SIDE_OBSTACLE_DIST * 1.2 or 
+                            d_right < SIDE_OBSTACLE_DIST * 1.2)
+            
+            if still_blocked:
+                # Obstacle still nearby - recalculate avoidance direction
+                action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
+                self.bb.set("plan_action", action)
+                self.recovery_steps = 0  # Reset recovery
+                return Status.RUNNING
+            
+            # Obstacle cleared - quick recovery (just 1 step forward, then resume)
+            if self.recovery_steps < 1:
                 if self.recovery_steps == 0:
-                    print(f"[AVOID] OBSTACLE CLEARED - recovery ({self.recovery_steps+1}/3)")
+                    print(f"[AVOID] OBSTACLE CLEARED - quick recovery")
                 action = "MOVE_FORWARD"
                 self.recovery_steps += 1
                 self.bb.set("plan_action", action)
                 return Status.RUNNING
             else:
-                #Recovery done, recalculate path from new position
+                # Recovery done, resume navigation
                 self.avoiding = False
                 print(f"[AVOID] RECOVERY COMPLETE - resuming navigation to {target['name'].upper()}")
         
+        # ============================================================================
+        # VISUAL SEARCH: When close to target but color not detected, rotate to scan
+        # ============================================================================
+        if distance_to_target < self.SEARCH_DISTANCE and not color_matches_target:
+            # Near target position but don't see the correct color - scan for it
+            if not self._search_logged:
+                print(f"[PLAN] SEARCH MODE: Near {target_name.upper()} (odom: {distance_to_target:.2f}m) - scanning...")
+                self._search_logged = True
+            
+            # If we see the color but it's not centered, turn toward it
+            if color_matches_target and detection_zone:
+                if detection_zone == 'left':
+                    action = 'TURN_LEFT'
+                elif detection_zone == 'right':
+                    action = 'TURN_RIGHT'
+                else:
+                    action = 'MOVE_FORWARD'
+                self._search_ticks = 0
+            else:
+                # Don't see target color - rotate to scan
+                action = 'TURN_LEFT'
+                self._search_ticks += 1
+                
+                # Log periodically during search
+                if self._search_ticks % 20 == 0:
+                    print(f"[PLAN] SCANNING for {target_name.upper()}... (ticks: {self._search_ticks})")
+            
+            self.bb.set("plan_action", action)
+            self._debug_tick += 1
+            return Status.RUNNING
+        else:
+            # Reset search state when target found or far away
+            self._search_logged = False
+            self._search_ticks = 0
+        
         #D. NAVIGATION (Hysteresis)
         #Calculate angle error to target
-        robot_x = robot_pos.get('x', 0.0)
-        robot_y = robot_pos.get('y', 0.0)
-        robot_theta = robot_pos.get('theta', 0.0)
-        
-        dx = target['x'] - robot_x
-        dy = target['y'] - robot_y
-        distance_to_target = math.sqrt(dx**2 + dy**2)
         target_angle = math.atan2(dy, dx)
         
         angle_diff = target_angle - robot_theta
