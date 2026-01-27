@@ -53,7 +53,7 @@ class SenseNode(Node):
     
     # Minimum bbox area to consider a detection (filters out far detections)
     # ~5000 px² is roughly a detection at 3m distance
-    MIN_BBOX_AREA = 3000
+    MIN_BBOX_AREA = 2000
     
     # Distance estimation calibration
     # A target filling ~1/4 of the image (80000 px² on 640x480) is roughly 0.5m
@@ -84,9 +84,6 @@ class SenseNode(Node):
         }
         self.odometry = {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.battery_level = None  # None until first message received
-        self.bumper_pressed = False  # Bumper sensor state
-        self.bumper_previously_pressed = False  # For edge detection
-        self.bumper_received = False  # Flag to track if bumper messages are being received
         self.color_detections = {'targets': []}
         self.human_detections = {'person_detected': False, 'persons': []}
         
@@ -119,7 +116,6 @@ class SenseNode(Node):
         self.create_subscription(Image, '/camera_front/image', self._camera_callback, 10)
         self.create_subscription(Odometry, '/odom', self._odom_callback, 10)
         self.create_subscription(BatteryState, '/battery_state', self._battery_callback, 10)
-        self.create_subscription(Bool, '/bumper', self._bumper_callback, 10)
         
         # === PUBLISHERS ===
         # Proximity sensors (Range messages)
@@ -145,12 +141,6 @@ class SenseNode(Node):
         # Battery (Float32 percentage)
         self.battery_pub = self.create_publisher(Float32, '/sense/battery', 10)
         
-        # Bumper (Bool - continuous state)
-        self.bumper_pub = self.create_publisher(Bool, '/sense/bumper', 10)
-        
-        # Bumper Event (Bool - event-driven: True only when collision is detected)
-        self.bumper_event_pub = self.create_publisher(Bool, '/sense/bumper_event', 10)
-        
         # Timer to publish proximity and odometry at fixed rate
         self.create_timer(0.1, self._publish_periodic)  # 10 Hz
         
@@ -158,8 +148,6 @@ class SenseNode(Node):
         self.get_logger().info('  - /sense/proximity/[front|front_left|front_right]')
         self.get_logger().info('  - /sense/odometry')
         self.get_logger().info('  - /sense/battery')
-        self.get_logger().info('  - /sense/bumper (continuous state)')
-        self.get_logger().info('  - /sense/bumper_event (collision event)')
         self.get_logger().info('  - /sense/detection (event-driven)')
         self.get_logger().info('  - /sense/detection_zone (continuous: left/center/right/none)')
     
@@ -187,22 +175,6 @@ class SenseNode(Node):
         """Process battery state"""
         # BatteryState.percentage is 0.0-1.0, convert to 0-100
         self.battery_level = msg.percentage * 100.0
-    
-    def _bumper_callback(self, msg: Bool):
-        """Process bumper sensor state with edge detection"""
-        self.bumper_received = True
-        self.bumper_pressed = msg.data
-        
-        # Log every bumper message for debugging
-        self.get_logger().debug(f"[BUMPER_RAW] Received: {self.bumper_pressed} (previous: {self.bumper_previously_pressed})")
-        
-        # Log edge transitions (False -> True = collision detected)
-        if self.bumper_pressed and not self.bumper_previously_pressed:
-            self.get_logger().info("🔴 [BUMPER] COLLISION DETECTED! Bumper activated (False→True)")
-        elif not self.bumper_pressed and self.bumper_previously_pressed:
-            self.get_logger().info("🟢 [BUMPER] Bumper released (True→False)")
-        
-        self.bumper_previously_pressed = self.bumper_pressed
     
     def _camera_callback(self, msg: Image):
         """Process camera image for color and human detection"""
@@ -442,21 +414,6 @@ class SenseNode(Node):
             battery_msg.data = self.battery_level
             self.battery_pub.publish(battery_msg)
         
-        # Publish bumper
-        bumper_msg = Bool()
-        bumper_msg.data = self.bumper_pressed
-        self.bumper_pub.publish(bumper_msg)
-        if self.bumper_pressed:
-            self.get_logger().info(f"[BUMPER_PUB] Publishing bumper=True (received={self.bumper_received})")
-        
-        # Publish bumper event (True only when collision just happened)
-        # This publishes EVERY frame the edge condition is true
-        bumper_event_msg = Bool()
-        bumper_event_msg.data = (self.bumper_pressed and not self.bumper_previously_pressed)
-        if bumper_event_msg.data:
-            self.bumper_event_pub.publish(bumper_event_msg)
-            self.get_logger().warn("⚠️  [BUMPER_EVENT] Published collision event (edge detected)")
-        
         # Publish detection zone continuously (for color centering in Plan node)
         # Determine zone from LATEST detections (color or human)
         current_zone = 'none'
@@ -481,18 +438,6 @@ class SenseNode(Node):
         zone_msg = String()
         zone_msg.data = current_zone
         self.detection_zone_pub.publish(zone_msg)
-        
-        # FALLBACK: Detect collision from ultrasonic sensors if bumper not working
-        if not self.bumper_received:
-            front_dist = self.ultrasonic_data.get('front', float('inf'))
-            # If robot is VERY close to obstacle (< 0.05m), it's probably colliding
-            if front_dist < 0.05 and front_dist > 0:
-                if not self.bumper_pressed:
-                    self.get_logger().warn("⚠️  [COLLISION_FALLBACK] Detected collision via ultrasonic (front < 0.05m)!")
-                    self.bumper_pressed = True
-            elif front_dist >= 0.10:
-                # Reset when far enough
-                self.bumper_pressed = False
     
     def _draw_debug(self, frame):
         """Draw debug information on frame"""

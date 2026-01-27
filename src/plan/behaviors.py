@@ -26,9 +26,9 @@ from py_trees.common import Status, ParallelPolicy
 ####################################################################################
 KNOWN_TARGETS = {
     # Color-based targets - robot will visit these and check for valve
-    'green': {'x': -3.2, 'y': -5, 'theta': -1.57}, #la x è 
+    'green': {'x': -3.2, 'y': -5.0, 'theta': -1.57}, #la x è 
     'blue': {'x': 0.0, 'y': -4.0, 'theta': 0.0},
-    'red': {'x': -6.5, 'y': -4, 'theta': 3.14},  # This is actually the valve, but robot doesn't know
+    'red': {'x': -6.5, 'y': -3.0, 'theta': 3.14},  # This is actually the valve, but robot doesn't know
 }
 
 # HOME/SPAWN POSITION - Will be saved automatically when robot starts
@@ -278,7 +278,6 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
-        self.bb.register_key("bumper_event", access=py_trees.common.Access.READ)
         self.bb.register_key("detected_color", access=py_trees.common.Access.WRITE)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self._last_logged_target = None  #Evita spam di log
@@ -340,14 +339,13 @@ class AtTarget(py_trees.behaviour.Behaviour):
         Complete Flow:
         1. Color Detection (< 1m): Center the color in camera
            - If left/right: turn until centered
-           - Once centered: go straight (CHARGE_COLOR)
-        2. Proximity Detection (front sensor < 0.15m):
-           - Check if valve is red
-           - Mark target as visited
-           - Stop and proceed to next target
+           - Once centered: go straight
+        2. Proximity Detection (front sensor < 0.20m):
+           - Apply x/y odometry correction
+           - Mark target as visited, proceed to next target
     """
     COLOR_DETECTION_DISTANCE = 1.0  # Distance threshold for color detection (meters)
-    PROXIMITY_THRESHOLD = 0.20  # Distance to consider target reached (meters)
+    PROXIMITY_THRESHOLD = 0.30  # Distance to consider target reached (meters)
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -355,7 +353,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
         self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
-        self.bb.register_key("robot_position", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("found", access=py_trees.common.Access.WRITE)
         self.bb.register_key("odom_correction", access=py_trees.common.Access.WRITE)
@@ -408,12 +406,28 @@ class AtTarget(py_trees.behaviour.Behaviour):
         color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
         
         # ============================================================================
-        # EMERGENCY STOP: If very close to wall AND correct color detected
+        # TARGET REACHED: Apply x/y correction and complete
         # ============================================================================
         if target_close and color_matches_target:
-            # TARGET REACHED - stop immediately
             print(f"[PLAN] TARGET REACHED: {target_name.upper()} (sensor: {min_distance:.2f}m) | Color: {detected_color}")
             
+            # Calculate and apply odometry correction (x/y only, no theta)
+            target_coords = KNOWN_TARGETS.get(target_name, {})
+            
+            new_correction = {
+                'dx': target_coords.get('x', 0.0) - robot_pos_raw.get('x', 0.0),
+                'dy': target_coords.get('y', 0.0) - robot_pos_raw.get('y', 0.0),
+                'dtheta': 0.0  # No theta correction
+            }
+            
+            self.bb.set("odom_correction", new_correction)
+            
+            print(f"[ODOM] CORRECTION APPLIED at {target_name.upper()}:")
+            print(f"[ODOM]   Raw pos: ({robot_pos_raw.get('x', 0):.2f}, {robot_pos_raw.get('y', 0):.2f})")
+            print(f"[ODOM]   Known:   ({target_coords.get('x', 0):.2f}, {target_coords.get('y', 0):.2f})")
+            print(f"[ODOM]   Offset:  (dx={new_correction['dx']:.2f}, dy={new_correction['dy']:.2f})")
+            
+            # Check if valve
             if detected_color == "red":
                 self.bb.set("found", "valve")
                 print(f"[PLAN] VALVE FOUND!")
@@ -434,7 +448,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
             return Status.SUCCESS
         
         # ============================================================================
-        # PHASE 1: COLOR DETECTION & CENTERING (< 1 meter, correct color only)
+        # COLOR DETECTION & CENTERING (< 1 meter, correct color only)
         # ============================================================================
         if color_matches_target and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
             # Log once when color first detected
@@ -443,8 +457,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
                 self._color_detected_logged = True 
                 self._centering_complete = False
             
-            # PHASE 1a: Center color in camera frame
-            # Use gentle turning (MOVE_FRONT_LEFT/RIGHT) to avoid oscillation
+            # Center color in camera frame
             if detection_zone and detection_zone != 'center':
                 if detection_zone == 'left':
                     self.bb.set("plan_action", "MOVE_FRONT_LEFT")
@@ -650,11 +663,11 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         
         # Thresholds: Double distance for humans
         if human_detected:
-            FRONT_OBSTACLE_DIST = 0.8  # Double for humans
-            SIDE_OBSTACLE_DIST = 0.6   # Double for humans
+            FRONT_OBSTACLE_DIST = 0.8  # higher for humans
+            SIDE_OBSTACLE_DIST = 0.6   # higher for humans
         else:
-            FRONT_OBSTACLE_DIST = 0.5
-            SIDE_OBSTACLE_DIST = 0.3
+            FRONT_OBSTACLE_DIST = 0.6  # increased for latency compensation
+            SIDE_OBSTACLE_DIST = 0.4
         
         is_blocked = (d_center < FRONT_OBSTACLE_DIST or 
                       d_left < SIDE_OBSTACLE_DIST or 
@@ -681,32 +694,39 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             self._debug_tick += 1
             return Status.RUNNING
 
-        #C. RECOVERY (Post-Avoidance)
+        #C. RECOVERY (Post-Avoidance) - Check if path to TARGET is clear, not just if obstacle is gone
         if self.avoiding:
-            # Check if obstacle is still detected - if so, stay in avoidance mode
-            still_blocked = (d_center < FRONT_OBSTACLE_DIST * 1.2 or 
-                            d_left < SIDE_OBSTACLE_DIST * 1.2 or 
-                            d_right < SIDE_OBSTACLE_DIST * 1.2)
+            # Calculate angle to target
+            target_angle = math.atan2(dy, dx)
+            angle_diff = target_angle - robot_theta
+            while angle_diff > math.pi:
+                angle_diff -= 2 * math.pi
+            while angle_diff < -math.pi:
+                angle_diff += 2 * math.pi
             
-            if still_blocked:
-                # Obstacle still nearby - recalculate avoidance direction
+            # Determine which sensor is relevant for the target direction
+            # If target is ahead (|angle| < 45°), check front sensor
+            # If target is left (angle > 45°), check left sensor  
+            # If target is right (angle < -45°), check right sensor
+            CLEAR_THRESHOLD = FRONT_OBSTACLE_DIST * 1.3  # Need a bit more clearance
+            
+            if abs(angle_diff) < 0.8:  # ~45° - target is roughly ahead
+                path_clear = d_center > CLEAR_THRESHOLD
+            elif angle_diff > 0:  # target is to the left
+                path_clear = d_left > CLEAR_THRESHOLD and d_center > FRONT_OBSTACLE_DIST
+            else:  # target is to the right
+                path_clear = d_right > CLEAR_THRESHOLD and d_center > FRONT_OBSTACLE_DIST
+            
+            if path_clear:
+                # Path to target is clear - resume navigation immediately
+                self.avoiding = False
+                self.recovery_steps = 0
+                print(f"[AVOID] PATH TO {target['name'].upper()} CLEAR - resuming navigation")
+            else:
+                # Path still blocked - continue avoidance
                 action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
                 self.bb.set("plan_action", action)
-                self.recovery_steps = 0  # Reset recovery
                 return Status.RUNNING
-            
-            # Obstacle cleared - quick recovery (just 1 step forward, then resume)
-            if self.recovery_steps < 1:
-                if self.recovery_steps == 0:
-                    print(f"[AVOID] OBSTACLE CLEARED - quick recovery")
-                action = "MOVE_FORWARD"
-                self.recovery_steps += 1
-                self.bb.set("plan_action", action)
-                return Status.RUNNING
-            else:
-                # Recovery done, resume navigation
-                self.avoiding = False
-                print(f"[AVOID] RECOVERY COMPLETE - resuming navigation to {target['name'].upper()}")
         
         # ============================================================================
         # VISUAL SEARCH: When close to target but color not detected, rotate to scan
