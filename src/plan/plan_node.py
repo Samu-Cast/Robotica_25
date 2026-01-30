@@ -40,6 +40,13 @@ import py_trees
 #Import behaviors from separate module
 from behaviors import build_tree
 
+# ============================================================================
+# BT VISUALIZATION CONFIG
+# ============================================================================
+BT_DISPLAY = True           # Set to False to disable BT visualization
+BT_DISPLAY_INTERVAL = 50    # Print tree every N ticks (50 = every 5 seconds at 10Hz)
+BT_DISPLAY_ON_CHANGE = True # Also print when state changes significantly
+
 
 #Mapping from internal actions to Act module commands
 ACTION_TO_COMMAND = {
@@ -94,6 +101,10 @@ class PlanNode(Node):
         self._init_blackboard()
         self.tree.setup_with_descendants()
         
+        # BT visualization state
+        self._tick_count = 0
+        self._last_bt_state = None
+        
         #Subscriptions to Sense topics
         self.create_subscription(
             Range, '/sense/proximity/front',
@@ -115,6 +126,7 @@ class PlanNode(Node):
         #Publishers to Act module
         self.cmd_pub = self.create_publisher(String, '/plan/command', 10)
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
+        self.bt_status_pub = self.create_publisher(String, '/plan/bt_status', 10)  # BT visualization topic
         
         #Startup synchronization: wait for robot_description + 20 seconds
         self._robot_ready = False
@@ -297,6 +309,11 @@ class PlanNode(Node):
             return
         
         self.tree.tick_once()
+        self._tick_count += 1
+        
+        # BT Visualization
+        if BT_DISPLAY:
+            self._display_behavior_tree()
         
         #Convert internal action to Act command
         action = self.bb.get("plan_action") or "STOP"
@@ -313,6 +330,62 @@ class PlanNode(Node):
             signals_msg.data = json.dumps(signals)
             self.signals_pub.publish(signals_msg)
             self.bb.set("signals", [])
+    
+    def _display_behavior_tree(self):
+        """
+        Display behavior tree state.
+        Publishes to /plan/bt_status topic for separate terminal viewing.
+        Use: ros2 topic echo /plan/bt_status
+        """
+        # Gather current state
+        found = self.bb.get("found")
+        action = self.bb.get("plan_action")
+        current_target = self.bb.get("current_target")
+        target_name = current_target.get('name') if current_target else None
+        visited = self.bb.get("visited_targets") or []
+        
+        current_state = (found, action, target_name, tuple(visited))
+        
+        # Determine if we should publish
+        interval_print = (self._tick_count % BT_DISPLAY_INTERVAL == 0)
+        state_changed = BT_DISPLAY_ON_CHANGE and (current_state != self._last_bt_state)
+        
+        if not (interval_print or state_changed):
+            return
+        
+        self._last_bt_state = current_state
+        
+        # Build status message
+        lines = []
+        lines.append(f"{'='*60}")
+        lines.append(f"[BT] Tick #{self._tick_count} | Action: {action}")
+        lines.append(f"[BT] Found: {found} | Target: {target_name}")
+        lines.append(f"{'='*60}")
+        
+        # Tree structure with status
+        tree_str = py_trees.display.unicode_tree(
+            self.tree,
+            show_only_visited=True,
+            show_status=True
+        )
+        lines.append(tree_str)
+        
+        # Blackboard values
+        d_l = self.bb.get("distance_left") or 0
+        d_c = self.bb.get("distance_center") or 0  
+        d_r = self.bb.get("distance_right") or 0
+        color = self.bb.get("detected_color")
+        robot_pos = self.bb.get("robot_position") or {}
+        
+        lines.append(f"[BB] Sensors: L={d_l:.2f}m C={d_c:.2f}m R={d_r:.2f}m")
+        lines.append(f"[BB] Color: {color} | Visited: {visited}")
+        lines.append(f"[BB] Pos: x={robot_pos.get('x', 0):.2f} y={robot_pos.get('y', 0):.2f} θ={robot_pos.get('theta', 0):.2f}")
+        lines.append(f"{'='*60}")
+        
+        # Publish to topic
+        msg = String()
+        msg.data = "\n".join(lines)
+        self.bt_status_pub.publish(msg)
 
 
 #entry point

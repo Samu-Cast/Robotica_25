@@ -23,7 +23,7 @@ from py_trees.common import Status
 from behaviors import (
     BatteryCheck, GoCharge, CalculateTarget, AtTarget, MoveToTarget,
     SearchObj, RecognitionPerson, RecognitionObstacle, RecognitionValve,
-    SignalPerson, GoAroundP, GoAroundO, ActiveValve, GoHome,
+    SignalPerson, GoAroundP, GoAroundO, ActiveValve, GoHome, InitialRetreat,
     build_tree, KNOWN_TARGETS
 )
 
@@ -68,6 +68,7 @@ class TestPlanBehaviors:
         self.bb.set("signals", [])
         self.bb.set("found", None)
         self.bb.set("mission_complete", False)
+        self.bb.set("plan_action", None)  # Importante per MoveToTarget e altri
     
     def teardown_method(self):
         """Cleanup dopo ogni test"""
@@ -223,32 +224,25 @@ class TestPlanBehaviors:
         print("✓ Ritorna FAILURE quando tutti i target sono visitati")
     
     def test_at_target_correct_color(self):
-        """Test AtTarget - fully aligned with red valve detection"""
-        print("\n[TEST] AtTarget - Aligned and red = valve")
+        """Test AtTarget - robot close to target with matching color = SUCCESS"""
+        print("\n[TEST] AtTarget - Close + Color Match = SUCCESS")
         
-        # Setup - robot NEAR target coordinates, aligned, red color = valve
-        # AtTarget checks distance to target first, then wall alignment
-        target = {'name': 'red', 'x': 0.5, 'y': 0.5, 'theta': 0.0}
+        # Setup - robot close to target (sensor < 0.30m) AND color matches target name
+        # AtTarget checks: min(d_left, d_center, d_right) < 0.30 AND detected_color == target['name']
+        target = {'name': 'red', 'x': -6.5, 'y': -3.0, 'theta': 3.14}
         self.bb.set("current_target", target)
-        self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})  # Within ARRIVAL_THRESHOLD
-        self.bb.set("detected_color", "red")  # Red color = valve!
+        self.bb.set("robot_position", {'x': -6.3, 'y': -3.0, 'theta': 3.14})  # Very close
+        self.bb.set("detected_color", "red")  # Color matches target name!
         self.bb.set("detection_zone", "center")  # Target centered in camera
-        self.bb.set("distance_center", 0.35)   # At target distance
-        self.bb.set("distance_left", 0.40)     # Aligned (diff < 0.05)
-        self.bb.set("distance_right", 0.40)    # Aligned (diff < 0.05)
+        self.bb.set("distance_center", 0.25)   # < PROXIMITY_THRESHOLD (0.30)
+        self.bb.set("distance_left", 0.40)
+        self.bb.set("distance_right", 0.40)
         self.bb.set("visited_targets", [])
         behavior = AtTarget()
         behavior.setup_with_descendants()
         
-        # Need multiple ticks to go through all alignment phases
-        # Phase 1: Visual centering (detection_zone=center -> skip)
-        # Phase 2: Sensor alignment (already aligned -> skip)
-        # Phase 3: Final approach (already at 0.35m -> skip)
-        # Phase 4: Complete
-        for _ in range(4):
-            status = behavior.update()
-            if status == Status.SUCCESS:
-                break
+        # Execute - should succeed on first tick since conditions are met
+        status = behavior.update()
         
         # Verify
         visited = self.bb.get("visited_targets")
@@ -256,36 +250,39 @@ class TestPlanBehaviors:
         
         assert status == Status.SUCCESS, f"Expected SUCCESS, got {status}"
         assert "red" in visited, "Target non marcato come visitato"
-        assert found == "valve", "Dovrebbe trovare valvola"
+        assert found == "valve", "Dovrebbe trovare valvola (red = valve)"
         
         print("✓ Target 'red' marcato come visitato")
         print(f"✓ Found: {found}")
     
     def test_at_target_not_aligned(self):
-        """Test AtTarget - robot needs visual centering (target on left)"""
-        print("\n[TEST] AtTarget - Non allineato (target a sinistra)")
+        """Test AtTarget - color detected but off-center, needs centering (RUNNING)"""
+        print("\n[TEST] AtTarget - Color off-center = RUNNING")
         
-        # Setup - robot NEAR target but not aligned with wall
-        target = {'name': 'green', 'x': 0.5, 'y': 0.5, 'theta': 0.0}
+        # Setup - robot NEAR target (< 1m), color matches but is on LEFT side
+        # AtTarget should return RUNNING and set action to MOVE_FRONT_LEFT
+        target = {'name': 'green', 'x': -3.2, 'y': -5.0, 'theta': -1.57}
         self.bb.set("current_target", target)
-        self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})  # Within ARRIVAL_THRESHOLD
-        self.bb.set("distance_center", 0.5)  # Near wall
-        self.bb.set("distance_left", 0.3)    # Not aligned
-        self.bb.set("distance_right", 0.8)   # Not aligned
+        self.bb.set("robot_position", {'x': -3.0, 'y': -4.5, 'theta': -1.57})  # Within 1m
+        self.bb.set("detected_color", "green")  # Color matches target
+        self.bb.set("detection_zone", "left")   # Color is on LEFT - needs centering
+        self.bb.set("distance_center", 0.8)     # Not close enough for completion
+        self.bb.set("distance_left", 0.6)
+        self.bb.set("distance_right", 1.0)
         self.bb.set("visited_targets", [])
-        self.bb.set("plan_action", None)     # Will be set by behavior
+        self.bb.set("plan_action", None)
         behavior = AtTarget()
         behavior.setup_with_descendants()
         
-        # Execute (first tick should be Phase 1: visual centering)
+        # Execute
         status = behavior.update()
         
-        # Verify - should return RUNNING while centering
+        # Verify - should return RUNNING while centering with MOVE_FRONT_LEFT
         action = self.bb.get("plan_action")
         assert status == Status.RUNNING, f"Expected RUNNING, got {status}"
-        assert action == "TURN_LEFT", f"Expected TURN_LEFT (target on left), got {action}"
+        assert action == "MOVE_FRONT_LEFT", f"Expected MOVE_FRONT_LEFT (color on left), got {action}"
         
-        print(f"✓ Robot si sta centrando visivamente: {action}")
+        print(f"✓ Robot si sta centrando sul colore: {action}")
     
     def test_move_to_target(self):
         """Test MoveToTarget - navigates to preset target"""
@@ -320,12 +317,13 @@ class TestPlanBehaviors:
         """Test MoveToTarget - con ostacolo vicino"""
         print("\n[TEST] MoveToTarget - Con ostacolo")
         
-        # Setup
+        # Setup - MUST set plan_action BEFORE creating behavior (otherwise key conflict)
+        self.bb.set("plan_action", None)
         target = {'name': 'blue', 'x': 5.0, 'y': 9.0, 'theta': 1.57}
         self.bb.set("current_target", target)
-        # Imposta sensore centrale bloccato, destra libera
-        self.bb.set("distance_left", 0.2)
-        self.bb.set("distance_center", 0.4)
+        # Imposta sensore sinistro bloccato, centro parzialmente bloccato, destra libera
+        self.bb.set("distance_left", 0.2)   # < SIDE_OBSTACLE_DIST (0.4)
+        self.bb.set("distance_center", 0.4) # < FRONT_OBSTACLE_DIST (0.6)
         self.bb.set("distance_right", 2.0)
         behavior = MoveToTarget()
         behavior.setup_with_descendants()
@@ -335,7 +333,7 @@ class TestPlanBehaviors:
         
         # Verify
         action = self.bb.get("plan_action")
-        # Con centro bloccato e destra libera, dovrebbe girare a destra
+        # Con sinistro e centro bloccati, destra libera -> TURN_RIGHT
         assert action == "TURN_RIGHT", f"Expected TURN_RIGHT, got {action}"
         print(f"✓ Action corretto con ostacolo: {action}")
     
@@ -344,12 +342,12 @@ class TestPlanBehaviors:
     # ========================================================================
     
     def test_search_obj_valve_priority(self):
-        """Test SearchObj - priorità valve"""
-        print("\n[TEST] SearchObj - Priorità valve")
+        """Test SearchObj - priorità valve (detected_color rosso)"""
+        print("\n[TEST] SearchObj - Priorità valve (detected_color=red)")
         
-        # Setup - tutti gli oggetti presenti
+        # Setup - red color = valve (priorità 1 in SearchObj)
+        self.bb.set("detected_color", "red")
         self.bb.set("detections", {
-            "valve": True,
             "person": True,
             "obstacle": True
         })
@@ -363,7 +361,7 @@ class TestPlanBehaviors:
         found = self.bb.get("found")
         assert status == Status.SUCCESS, f"Expected SUCCESS, got {status}"
         assert found == "valve", f"Expected 'valve', got {found}"
-        print("✓ Valve ha priorità massima")
+        print("✓ Valve ha priorità massima (detected_color=red)")
     
     def test_search_obj_person_priority(self):
         """Test SearchObj - priorità person (senza valve)"""
@@ -570,45 +568,46 @@ class TestPlanBehaviors:
         print(f"✓ Mission complete: {mission_complete}")
     
     def test_go_home_at_home(self):
-        """Test GoHome - già a casa (posizione 0,0)"""
-        print("\n[TEST] GoHome - Già a casa")
+        """Test GoHome - già a casa ma deve fare retreat prima"""
+        print("\n[TEST] GoHome - Già a casa (retreat phase)")
         
         # Setup - robot vicino a home (0,0)
+        # GoHome ha una fase di retreat (3 secondi) prima di navigare
         self.bb.set("robot_position", {'x': 0.1, 'y': 0.1, 'theta': 0.0})
+        self.bb.set("plan_action", None)  # Sarà settato dal behavior
         behavior = GoHome()
         behavior.setup_with_descendants()
         
-        # Execute
+        # Execute - primo tick dovrebbe essere in retreat
         status = behavior.update()
         
-        # Verify
+        # Verify - in retreat phase
         action = self.bb.get("plan_action")
-        assert status == Status.SUCCESS, f"Expected SUCCESS, got {status}"
-        assert action == "STOP", f"Expected STOP, got {action}"
-        print("✓ Riconosciuto arrivo a casa (distanza < 0.3m)")
+        assert status == Status.RUNNING, f"Expected RUNNING (retreat phase), got {status}"
+        assert action == "MOVE_BACKWARD", f"Expected MOVE_BACKWARD (retreat), got {action}"
+        print("✓ GoHome in fase di retreat iniziale")
         print(f"✓ Action: {action}")
     
     def test_go_home_moving(self):
-        """Test GoHome - in movimento verso casa"""
-        print("\n[TEST] GoHome - In movimento")
+        """Test GoHome - in retreat poi movimento verso casa"""
+        print("\n[TEST] GoHome - Retreat then move")
         
         # Setup - robot lontano da home
         self.bb.set("robot_position", {'x': 5.0, 'y': 5.0, 'theta': 0.0})
+        self.bb.set("plan_action", None)
+        self.bb.set("goal_pose", None)
         behavior = GoHome()
         behavior.setup_with_descendants()
         
-        # Execute
+        # Execute - primo tick = retreat
         status = behavior.update()
         
-        # Verify
+        # Verify - dovrebbe essere in retreat
         action = self.bb.get("plan_action")
-        goal_pose = self.bb.get("goal_pose")
         assert status == Status.RUNNING, f"Expected RUNNING, got {status}"
-        assert action == "MOVE_TO_GOAL", f"Expected MOVE_TO_GOAL, got {action}"
-        assert goal_pose == {'x': 0.0, 'y': 0.0, 'theta': 0.0}, "Goal pose dovrebbe essere home (0,0)"
-        print("✓ In movimento verso casa (distanza > 0.3m)")
+        assert action == "MOVE_BACKWARD", f"Expected MOVE_BACKWARD (retreat phase), got {action}"
+        print("✓ In fase retreat (prima di navigare verso casa)")
         print(f"✓ Action: {action}")
-        print(f"✓ Goal pose: {goal_pose}")
     
     # ========================================================================
     # INTEGRATION TEST

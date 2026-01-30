@@ -898,6 +898,7 @@ class SignalPerson(py_trees.behaviour.Behaviour):
         signals = self.bb.get("signals") or []
         signals.append("PersonFound")
         self.bb.set("signals", signals)
+        print(f"[PLAN] PERSON DETECTED - SignalPerson: PersonFound added to signals")
         return Status.SUCCESS
 
 
