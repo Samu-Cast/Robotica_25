@@ -17,6 +17,9 @@ ARGUMENTS = [
                           choices=['true', 'false'], description='Start rviz.'),
     DeclareLaunchArgument('world', default_value='laboratorio',
                           description='Ignition World'),
+    DeclareLaunchArgument('lite_mode', default_value='false',
+                          choices=['true', 'false'],
+                          description='Disable unused sensors for lighter simulation'),
 ]
 
 SPAWN_DEFAULTS = {'x': '0.0', 'y': '0.0', 'z': '0.0', 'yaw': '-1.57'}
@@ -55,7 +58,8 @@ def generate_launch_description():
             ('x', LaunchConfiguration('x')),
             ('y', LaunchConfiguration('y')),
             ('z', LaunchConfiguration('z')),
-            ('yaw', LaunchConfiguration('yaw'))])
+            ('yaw', LaunchConfiguration('yaw')),
+            ('lite_mode', LaunchConfiguration('lite_mode'))])
 
     create3_nodes = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([create3_nodes_launch]),

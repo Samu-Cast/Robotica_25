@@ -6,4 +6,4 @@ colcon build
 
 source install/setup.bash
 
-ros2 launch irobot_create_gz_bringup create3_gz.launch.py
+ros2 launch irobot_create_gz_bringup create3_gz.launch.py lite_mode:=true

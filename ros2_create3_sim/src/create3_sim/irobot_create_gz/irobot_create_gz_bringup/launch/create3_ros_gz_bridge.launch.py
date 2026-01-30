@@ -3,6 +3,7 @@
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction
+from launch.conditions import UnlessCondition
 from launch.substitutions import LaunchConfiguration
 
 from launch_ros.actions import Node
@@ -18,7 +19,10 @@ ARGUMENTS = [
     DeclareLaunchArgument('namespace', default_value='',
                           description='Robot namespace'),
     DeclareLaunchArgument('world', default_value='depot',
-                          description='World name')
+                          description='World name'),
+    DeclareLaunchArgument('lite_mode', default_value='false',
+                          choices=['true', 'false'],
+                          description='Disable unused sensors for lighter simulation'),
 ]
 
 
@@ -28,6 +32,7 @@ def generate_launch_description():
     dock_name = LaunchConfiguration('dock_name')
     namespace = LaunchConfiguration('namespace')
     world = LaunchConfiguration('world')
+    lite_mode = LaunchConfiguration('lite_mode')
 
     cliff_sensors = [
         'cliff_front_left',
@@ -132,7 +137,9 @@ def generate_launch_description():
                                  ])
 
     # Cliff bridge
-    cliff_bridges = GroupAction([
+    cliff_bridges = GroupAction(
+        condition=UnlessCondition(lite_mode),
+        actions=[
         Node(package='ros_gz_bridge', executable='parameter_bridge',
              name=cliff + '_bridge',
              output='screen',
@@ -155,7 +162,9 @@ def generate_launch_description():
     ])
 
     # IR intensity bridges
-    ir_bridges = GroupAction([
+    ir_bridges = GroupAction(
+        condition=UnlessCondition(lite_mode),
+        actions=[
         Node(package='ros_gz_bridge', executable='parameter_bridge',
              name=ir + '_bridge',
              output='screen',
@@ -207,6 +216,7 @@ def generate_launch_description():
         executable='parameter_bridge',
         name='buttons_msg_bridge',
         output='screen',
+        condition=UnlessCondition(lite_mode),
         parameters=[{
             'use_sim_time': use_sim_time
         }],
@@ -238,13 +248,18 @@ def generate_launch_description():
 
     # Create launch description and add actions
     ld = LaunchDescription(ARGUMENTS)
+    
+    # Essential bridges (always active)
     ld.add_action(cmd_vel_bridge)
     ld.add_action(pose_bridge)
     ld.add_action(odom_base_tf_bridge)
+    ld.add_action(ultrasonic_bridges)
+    ld.add_action(camera_bridge)
     ld.add_action(bumper_contact_bridge)
+    
+    # Non-essential bridges (disabled in lite_mode via condition in constructor)
     ld.add_action(cliff_bridges)
     ld.add_action(ir_bridges)
-    ld.add_action(ultrasonic_bridges)
     ld.add_action(buttons_msg_bridge)
-    ld.add_action(camera_bridge)
+    
     return ld

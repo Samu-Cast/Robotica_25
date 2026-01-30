@@ -31,6 +31,9 @@ ARGUMENTS = [
     DeclareLaunchArgument('spawn_dock', default_value='true',
                           choices=['true', 'false'],
                           description='Spawn the standard dock model.'),
+    DeclareLaunchArgument('lite_mode', default_value='false',
+                          choices=['true', 'false'],
+                          description='Disable unused sensors for lighter simulation'),
 ]
 
 for pose_element in ['x', 'y', 'z', 'yaw']:
@@ -128,6 +131,7 @@ def generate_launch_description():
                 ('world', LaunchConfiguration('world')),
                 ('robot_name', robot_name),
                 ('dock_name', dock_name),
+                ('lite_mode', LaunchConfiguration('lite_mode')),
             ]
         ),
 
@@ -135,7 +139,8 @@ def generate_launch_description():
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([create3_nodes_launch]),
             launch_arguments=[
-                ('namespace', namespace)
+                ('namespace', namespace),
+                ('lite_mode', LaunchConfiguration('lite_mode')),
             ]
         ),
 

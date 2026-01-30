@@ -7,6 +7,7 @@
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
@@ -17,6 +18,9 @@ ARGUMENTS = [
                           description='Which gazebo simulator to use'),
     DeclareLaunchArgument('namespace', default_value='',
                           description='Robot namespace'),
+    DeclareLaunchArgument('lite_mode', default_value='false',
+                          choices=['true', 'false'],
+                          description='Disable unused nodes for lighter simulation'),
 ]
 
 
@@ -44,6 +48,9 @@ def generate_launch_description():
     ui_mgr_params_yaml_file = PathJoinSubstitution(
         [pkg_create3_common_bringup, 'config', 'ui_mgr_params.yaml'])
 
+    # Launch configurations
+    lite_mode = LaunchConfiguration('lite_mode')
+
     # Includes
     diffdrive_controller = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([control_launch_file]),
@@ -55,6 +62,7 @@ def generate_launch_description():
         package='irobot_create_nodes',
         name='hazards_vector_publisher',
         executable='hazards_vector_publisher',
+        condition=UnlessCondition(lite_mode),
         parameters=[hazards_params_yaml_file,
                     {'use_sim_time': True}],
         output='screen',
@@ -65,6 +73,7 @@ def generate_launch_description():
         package='irobot_create_nodes',
         name='ir_intensity_vector_publisher',
         executable='ir_intensity_vector_publisher',
+        condition=UnlessCondition(lite_mode),
         parameters=[ir_intensity_params_yaml_file,
                     {'use_sim_time': True}],
         output='screen',
@@ -91,6 +100,7 @@ def generate_launch_description():
         package='irobot_create_nodes',
         name='wheel_status_publisher',
         executable='wheel_status_publisher',
+        condition=UnlessCondition(lite_mode),
         parameters=[wheel_status_params_yaml_file,
                     {'use_sim_time': True}],
         output='screen',
@@ -101,6 +111,7 @@ def generate_launch_description():
         package='irobot_create_nodes',
         name='mock_publisher',
         executable='mock_publisher',
+        condition=UnlessCondition(lite_mode),
         parameters=[mock_params_yaml_file,
                     {'use_sim_time': True}],
         output='screen',
@@ -111,6 +122,7 @@ def generate_launch_description():
         package='irobot_create_nodes',
         name='robot_state',
         executable='robot_state',
+        condition=UnlessCondition(lite_mode),
         parameters=[robot_state_yaml_file,
                     {'use_sim_time': True}],
         output='screen',
@@ -121,6 +133,7 @@ def generate_launch_description():
         package='irobot_create_nodes',
         name='kidnap_estimator_publisher',
         executable='kidnap_estimator_publisher',
+        condition=UnlessCondition(lite_mode),
         parameters=[kidnap_estimator_yaml_file,
                     {'use_sim_time': True}],
         output='screen',
@@ -131,6 +144,7 @@ def generate_launch_description():
         package='irobot_create_nodes',
         name='ui_mgr',
         executable='ui_mgr',
+        condition=UnlessCondition(lite_mode),
         parameters=[ui_mgr_params_yaml_file,
                     {'use_sim_time': True},
                     {'gazebo': LaunchConfiguration('gazebo')}],
@@ -139,12 +153,14 @@ def generate_launch_description():
 
     # Define LaunchDescription variable
     ld = LaunchDescription(ARGUMENTS)
-    # Include robot description
+    
+    # Essential nodes (always active)
     ld.add_action(diffdrive_controller)
-    # Add nodes to LaunchDescription
+    ld.add_action(motion_control_node)
+    
+    # Non-essential nodes (disabled in lite_mode via condition in constructor)
     ld.add_action(hazards_vector_node)
     ld.add_action(ir_intensity_vector_node)
-    ld.add_action(motion_control_node)
     ld.add_action(wheel_status_node)
     ld.add_action(mock_topics_node)
     ld.add_action(robot_state_node)
