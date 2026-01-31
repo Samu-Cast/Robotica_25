@@ -27,6 +27,7 @@ os.environ.setdefault("KMP_WARNINGS", "0")
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import LaserScan, Image, Range, BatteryState
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose2D
@@ -135,8 +136,8 @@ class SenseNode(Node):
         # This allows Plan node to know where detection is in camera frame for centering
         self.detection_zone_pub = self.create_publisher(String, '/sense/detection_zone', 10)
         
-        # Debug image
-        self.debug_image_pub = self.create_publisher(Image, '/sense/debug_image', 10)
+        # Debug image - publish with larger queue
+        self.debug_image_pub = self.create_publisher(Image, '/sense/debug_image', 30)
         
         # Battery (Float32 percentage)
         self.battery_pub = self.create_publisher(Float32, '/sense/battery', 10)

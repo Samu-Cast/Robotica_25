@@ -328,7 +328,7 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
             return Status.SUCCESS
         
         # All targets visited
-        print(f"[PLAN] ALL TARGETS VISITED: {visited}")
+        #print(f"[PLAN] ALL TARGETS VISITED: {visited}")
         return Status.FAILURE
 
 
@@ -906,7 +906,10 @@ class GoAroundP(py_trees.behaviour.Behaviour):
     """
         Smart avoidance for person - turn to the opposite side of where person is detected.
         Uses detection_zone from camera to decide direction.
+        ALSO saves robot position as human_position on FIRST avoidance.
     """
+    _human_position_saved = False  # Class variable to track if already saved
+    
     def __init__(self):
         super().__init__(name="GoAroundP")
         self.bb = self.attach_blackboard_client(name=self.name)
@@ -914,8 +917,25 @@ class GoAroundP(py_trees.behaviour.Behaviour):
         self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
+        self.bb.register_key("human_position", access=py_trees.common.Access.WRITE)
     
     def update(self):
+        # Save human position on FIRST avoidance only
+        if not GoAroundP._human_position_saved:
+            robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+            odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+            
+            human_pos = {
+                'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
+                'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
+                'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+            }
+            self.bb.set("human_position", human_pos)
+            GoAroundP._human_position_saved = True
+            print(f"[PLAN] HUMAN POSITION SAVED @ ({human_pos['x']:.2f}, {human_pos['y']:.2f})")
+        
         zone = self.bb.get("detection_zone")
         dist_left = self.bb.get("distance_left") or 999.0
         dist_right = self.bb.get("distance_right") or 999.0
@@ -1002,44 +1022,74 @@ class ActiveValve(py_trees.behaviour.Behaviour):
         return Status.SUCCESS
 
 
-class GoHome(py_trees.behaviour.Behaviour):
+class GoToHuman(py_trees.behaviour.Behaviour):
     """
-        Navigate back to home position (spawn point 0, 0) using odometry.
-        First retreats from wall, then navigates home.
-        Returns SUCCESS when within 0.3m of home.
+        Navigate back to human position using odometry + visual homing.
+        
+        3-Phase approach:
+        1. RETREAT: Back away from wall (3 seconds)
+        2. ODOM_NAV: Use odometry to navigate toward human_position
+        3. VISUAL_APPROACH: When near human, use person detection for precise approach
     """
     RETREAT_TIME = 3.0  # Seconds to retreat before navigating
+    HUMAN_TOLERANCE = 1.0  # Switch to visual homing when within this distance
+    VISUAL_COMPLETE_DISTANCE = 0.5  # Ultrasonic distance to consider arrived
+    
+    # Hysteresis thresholds (same as MoveToTarget)
+    HYSTERESIS_THRESHOLD = 0.4  # ~23 degrees
+    ALIGNMENT_THRESHOLD = 0.2   # ~11 degrees
     
     def __init__(self):
-        super().__init__(name="GoHome")
+        super().__init__(name="GoToHuman")
         self.bb = self.attach_blackboard_client(name=self.name)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
-        self.bb.register_key("home_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("human_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("goal_pose", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("found", access=py_trees.common.Access.READ)
+        self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
+        
+        # Internal state
         self._last_log_time = None
         self._retreat_start = None
         self._retreat_done = False
+        self._visual_homing_active = False
+        self._visual_search_ticks = 0
+        self._last_action = "MOVE_FORWARD"
     
     def update(self):
-        # Home position = spawn platform (saved at startup by InitialRetreat)
-        home_pos = self.bb.get("home_position") or HOME_POSITION_DEFAULT
-        home_x = home_pos['x']
-        home_y = home_pos['y']
+        # Get human position (saved by GoAroundP on first avoidance)
+        human_pos = self.bb.get("human_position")
+        if not human_pos:
+            # No human position saved - cannot navigate
+            print(f"[PLAN] GO TO HUMAN - ERROR: No human_position saved!")
+            self.bb.set("plan_action", "STOP")
+            return Status.FAILURE
         
-        # Get current robot position from odometry
-        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
-        current_x = robot_pos.get('x', 0.0)
-        current_y = robot_pos.get('y', 0.0)
+        human_x = human_pos['x']
+        human_y = human_pos['y']
         
-        # Calculate Euclidean distance to home
-        distance = ((current_x - home_x)**2 + (current_y - home_y)**2)**0.5
+        # Get raw robot position and apply odometry correction
+        robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
         
-        # PHASE 1: Retreat from wall first
+        current_x = robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0)
+        current_y = robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0)
+        current_theta = robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+        
+        dx = human_x - current_x
+        dy = human_y - current_y
+        distance = math.sqrt(dx**2 + dy**2)
+        
+        # ================================================================
+        # PHASE 1: RETREAT from wall
+        # ================================================================
         if not self._retreat_done:
             if self._retreat_start is None:
                 self._retreat_start = time.time()
-                print(f"[PLAN] GO HOME - Retreating from wall first...")
+                print(f"[PLAN] GO TO HUMAN - Phase 1: Retreating from wall...")
             
             elapsed = time.time() - self._retreat_start
             if elapsed < self.RETREAT_TIME:
@@ -1047,22 +1097,86 @@ class GoHome(py_trees.behaviour.Behaviour):
                 return Status.RUNNING
             else:
                 self._retreat_done = True
-                print(f"[PLAN] GO HOME - Retreat done, navigating to ({home_x:.2f}, {home_y:.2f})")
+                print(f"[PLAN] GO TO HUMAN - Phase 2: Navigating to human @ ({human_x:.2f}, {human_y:.2f})")
         
-        # PHASE 2: Navigate to home
-        # Log periodically
+        # ================================================================
+        # PHASE 3: VISUAL APPROACH (when close enough or already active)
+        # ================================================================
+        if self._visual_homing_active or distance < self.HUMAN_TOLERANCE:
+            if not self._visual_homing_active:
+                self._visual_homing_active = True
+                print(f"[PLAN] GO TO HUMAN - Phase 3: Visual approach to person...")
+            
+            found = self.bb.get("found")
+            detection_zone = self.bb.get("detection_zone")
+            d_center = self.bb.get("distance_center") or 999.0
+            
+            # SUCCESS: Close to person
+            if d_center < self.VISUAL_COMPLETE_DISTANCE:
+                self.bb.set("plan_action", "STOP")
+                print(f"[PLAN] HUMAN REACHED via visual approach (ultrasonic: {d_center:.2f}m)")
+                return Status.SUCCESS
+            
+            # PERSON DETECTED - center and approach
+            if found == "person":
+                self._visual_search_ticks = 0
+                
+                if detection_zone == 'left':
+                    action = 'MOVE_FRONT_LEFT'
+                elif detection_zone == 'right':
+                    action = 'MOVE_FRONT_RIGHT'
+                else:  # center
+                    action = 'MOVE_FORWARD'
+                
+                if self._last_log_time is None or (time.time() - self._last_log_time) > 3.0:
+                    self._last_log_time = time.time()
+                    print(f"[PLAN] VISUAL APPROACH: Person detected ({detection_zone}) | US: {d_center:.2f}m | {action}")
+                
+                self.bb.set("plan_action", action)
+                return Status.RUNNING
+            
+            # PERSON NOT DETECTED - scan for them
+            self._visual_search_ticks += 1
+            if self._visual_search_ticks % 30 == 1:
+                print(f"[PLAN] VISUAL APPROACH: Scanning for person... (ticks: {self._visual_search_ticks})")
+            
+            self.bb.set("plan_action", "TURN_LEFT")
+            return Status.RUNNING
+        
+        # ================================================================
+        # PHASE 2: ODOMETRY NAVIGATION with hysteresis
+        # Also check for person detection - switch to visual approach if found
+        # ================================================================
+        
+        # Check for person while navigating (early visual lock)
+        found = self.bb.get("found")
+        if found == "person":
+            self._visual_homing_active = True
+            print(f"[PLAN] GO TO HUMAN - PERSON DETECTED during navigation! Switching to visual approach...")
+            return Status.RUNNING
+        
         if self._last_log_time is None or (time.time() - self._last_log_time) > 5.0:
             self._last_log_time = time.time()
-            print(f"[PLAN] GO HOME -> ({home_x:.2f}, {home_y:.2f}) | Dist: {distance:.2f}m")
+            angle_deg = math.degrees(math.atan2(dy, dx) - current_theta)
+            print(f"[PLAN] GO TO HUMAN -> ({human_x:.2f}, {human_y:.2f}) | Dist: {distance:.2f}m | Ang: {angle_deg:+.0f}deg")
         
-        # Check if we've arrived
-        if distance < 0.3:
-            self.bb.set("plan_action", "STOP")
-            print(f"[PLAN] HOME REACHED (dist: {distance:.2f}m)")
-            return Status.SUCCESS
+        # Calculate angle to human
+        target_angle = math.atan2(dy, dx)
+        angle_diff = target_angle - current_theta
+        while angle_diff > math.pi:
+            angle_diff -= 2 * math.pi
+        while angle_diff < -math.pi:
+            angle_diff += 2 * math.pi
         
-        # Navigate toward home using direction calculation
-        action = calculate_direction_to_target(robot_pos, home_pos)
+        # Hysteresis navigation
+        if abs(angle_diff) < self.ALIGNMENT_THRESHOLD:
+            action = 'MOVE_FORWARD'
+        elif abs(angle_diff) > self.HYSTERESIS_THRESHOLD:
+            action = 'MOVE_FRONT_LEFT' if angle_diff > 0 else 'MOVE_FRONT_RIGHT'
+        else:
+            action = self._last_action if self._last_action in ['MOVE_FORWARD', 'MOVE_FRONT_LEFT', 'MOVE_FRONT_RIGHT'] else 'MOVE_FORWARD'
+        
+        self._last_action = action
         self.bb.set("plan_action", action)
         return Status.RUNNING
 
@@ -1084,7 +1198,7 @@ def build_tree():
                     - FoundHandler (Selector: PersonHandler or ObstacleHandler)
             - RecognitionValve
             - ActiveValve
-            - GoHome
+            - GoToHuman
     """
     #Battery management: check battery, go charge if low
     battery = Selector("Battery", memory=False, children=[
@@ -1153,7 +1267,7 @@ def build_tree():
         battery,
         target_loop,  #Loop until valve found
         ActiveValve(),
-        GoHome()
+        GoToHuman()
     ])
     
     #Retry until mission success

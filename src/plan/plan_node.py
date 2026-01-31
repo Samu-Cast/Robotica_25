@@ -93,8 +93,11 @@ class PlanNode(Node):
             'detected_color', 'color_area', 'odom_correction', 'detection_zone',
             'detection_distance', 'detection_confidence',
             'distance_left', 'distance_center', 'distance_right',
-            'robot_position', 'startup_complete', 'home_position'
+            'robot_position', 'startup_complete', 'home_position', 'human_position'
         ]
+        
+        # Track if human position already saved (only save first detection)
+        self._human_position_saved = False
         for key in blackboard_keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
         
@@ -286,6 +289,22 @@ class PlanNode(Node):
             #Set found based on detection type and color
             if det['type'] == 'person':
                 self.bb.set("found", "person")
+                
+                # SAVE HUMAN POSITION on first person detection
+                # Use proximity distance to filter (only save if close enough)
+                prox_dist = det.get('proximity_distance', 999.0)
+                if not self._human_position_saved and prox_dist < 2.0:
+                    robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+                    odom_corr = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+                    human_pos = {
+                        'x': robot_pos.get('x', 0.0) + odom_corr.get('dx', 0.0),
+                        'y': robot_pos.get('y', 0.0) + odom_corr.get('dy', 0.0),
+                        'theta': robot_pos.get('theta', 0.0) + odom_corr.get('dtheta', 0.0)
+                    }
+                    self.bb.set("human_position", human_pos)
+                    self._human_position_saved = True
+                    self.get_logger().info(f"HUMAN POSITION SAVED @ ({human_pos['x']:.2f}, {human_pos['y']:.2f})")
+                    
             elif det.get('color') == 'red':
                 #Red color = valve
                 self.bb.set("found", "valve")
