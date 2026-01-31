@@ -57,12 +57,11 @@ def generate_launch_description():
         launch_arguments=[('namespace', LaunchConfiguration('namespace'))]
     )
 
-    # Publish hazards vector
+    # Publish hazards vector (needed for motion_control backup behavior)
     hazards_vector_node = Node(
         package='irobot_create_nodes',
         name='hazards_vector_publisher',
         executable='hazards_vector_publisher',
-        condition=UnlessCondition(lite_mode),
         parameters=[hazards_params_yaml_file,
                     {'use_sim_time': True}],
         output='screen',
@@ -157,9 +156,9 @@ def generate_launch_description():
     # Essential nodes (always active)
     ld.add_action(diffdrive_controller)
     ld.add_action(motion_control_node)
+    ld.add_action(hazards_vector_node)  # Needed for backup behavior
     
     # Non-essential nodes (disabled in lite_mode via condition in constructor)
-    ld.add_action(hazards_vector_node)
     ld.add_action(ir_intensity_vector_node)
     ld.add_action(wheel_status_node)
     ld.add_action(mock_topics_node)
