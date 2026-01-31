@@ -1,88 +1,84 @@
 Design Document – ISRLAB Virtual Robotics Project
 
-1. General Project Description (Abstract)
+# 1. General Project Description
 
-This project introduces Charlie, an autonomous mobile robot designed to operate inside hazardous indoor environments affected by accidental toxic substance release. The scenario simulates a chemical laboratory where a contaminant leak has compromised air quality and visibility, making human intervention dangerous.
-Charlie’s primary mission is to reach and activate the emergency ventilation system, located in one of several possible locations inside the building. To accomplish this, the robot autonomously explores the environment, navigates toward predefined candidate points, and reacts to unexpected obstacles along the way.
+This project introduces Charlie, an autonomous mobile robot designed to operate inside hazardous indoor environments affected by accidental toxic substance release. The scenario simulates a chemical laboratory where a contaminant leak has compromised air quality and visibility, making human intervention dangerous. 
+
+Charlie’s primary mission is to reach and simulate the activation of the emergency ventilation system (represented with a red target), located in one of several possible locations inside the building. To accomplish this, the robot autonomously explores the environment, navigates toward predefined candidate points, and reacts to unexpected obstacles along the way.
+
 During its mission, Charlie identifies chemical debris, laboratory containers, and potential victims, using onboard perception based on object detection. The robot reports detected victims to rescue teams and ignores or bypasses non-hazardous obstacles. Its operation enhances safety by avoiding the need for personnel to enter contaminated zones.
 
-2. Robot Model Description
+# 2. Simulated Robot model technical description
 
-2.1 Robot Model
+## 2.1 Robot Model
 
-Charlie is based on a compact mobile rover platform selected from the Gazebo Harmonic standard model library. The chosen platform ensures compatibility with default sensors, differential-drive control, and ROS 2 navigation. Its chassis is optimized for indoor exploration and cluttered laboratory layouts.
+The robotic platform selected for this simulated mission is the **iRobot Create 3**, a widely standardized mobile robot in academic research for autonomous navigation. This platform is characterized by a **differential drive kinematics configuration**, which imposes non-holonomic constraints on the robot's motion—specifically, the inability to move instantaneously in the lateral direction. Despite this constraint, the differential drive system allows for a **zero turning radius**, granting the robot exceptional maneuverability in tight, clutter-filled environments such as the simulated hazardous laboratory. The robot features a compact, circular footprint with compact dimensions, ensuring minimal inertial impact during dynamic maneuvers. Its native integration with **ROS 2** (Robot Operating System) provides a robust middleware layer for high-level control, facilitating the implementation of complex navigation and perception stacks.
 
-2.2 Sensors Set
+## 2.2 Sensors Set
 
-Charlie integrates a multimodal perception suite suited for chemical emergency scenarios:
+The robot's perception system is architected around a multi-modal sensor suite, categorized into **Environmental** and **Internal** sensory channels to ensure robust environmental awareness and precise state estimation.
 
-RGB Camera – used for real-time object detection via YOLO (victims, buttons).
+### Environmental Perception (External Sensing)
+Primary semantic understanding is driven by a front-facing **RGB Camera**, which feeds visual data into a **YOLO-based neural network** for the detection of critical entities such as victims and hazard source control mechanisms. Complementing the visual system is an array of **three ultrasonic sensors** (front, front-left, front-right). This configuration enables a multi-layered obstacle avoidance strategy, providing mid-range spatial awareness for maneuvering and wall-following behaviors.
 
-Ultrasonic Sensors – assist in mapping, localization, and obstacle avoidance.
+### Internal State Monitoring (Proprioception)
+For localization and odometry, the platform relies on an **Inertial Measurement Unit (IMU)** and high-resolution **wheel encoders**. The fusion of inertial data (linear acceleration and angular velocity) with wheel odometry allows for accurate dead-reckoning navigation, which is indispensable for maintaining an estimate of the robot's pose map-frame.
 
-2.3 Actuators Set
+## 2.3 Actuators Set
 
-Charlie is equipped with:
+Actuation is governed by two independent DC motors driving the main wheels, implementing a classic differential drive topology. Control is achieved by varying the velocity difference between the left and right wheels; synchronous rotation produces linear motion, while opposing rotation generates in-place angular displacement. This kinematic arrangement is particularly advantageous for the project's operational domain, allowing the agent to perform re-orientation maneuvers without translational displacement—a critical capability when navigating narrow corridors obstructed by debris.
 
-Differential drive motors, enabling precise motion in tight interior spaces.
+## 2.4 Body Shape °°°°°inserire foto°°°°°
 
-Optional micro-arm or virtual activation module, used only if physical interaction with the ventilation switch is required.
-In simulations where physical contact is unnecessary, reaching a designated activation zone is sufficient to trigger the system.
+The morphological design of the robot features a **cylindrical chassis** with a low vertical profile. This axially symmetric shape offers significant algorithmic advantages for path planning and collision checking. Since the robot's collision footprint is invariant under rotation, the motion planner can treat the robot as a simple circle in the configuration space, drastically simplifying the computational complexity of obstacle avoidance and path generation. Furthermore, the absence of protruding corners significantly reduces the risk of entanglement with environmental clutter, enhancing the robust execution of autonomous exploration tasks.
 
-2.4 Body Shape
+## 2.5 Detail Analysis: Localization and State Estimation
 
-Charlie is designed as a compact, lightweight rover with a circular base. Its low-height frame allows movement under partially collapsed structures, while its slim profile ensures maneuverability in tight indoor passageways. The robot's shape is optimized for stability, mobility, and safe operation in hazardous environments.
+**Localization Strategy:**
+The robot's positioning relies on **Odometry**, integrating kinematic data from wheel encoders to estimate displacement. The system architecture includes an **odometry correction mechanism** within the Behavior Tree's Blackboard (`odom_correction`), designed to offset accumulative drift by anchoring the robot's pose to known semantic landmarks. In the current implementation, the robot primarily trusts the short-term accuracy of the encoders and IMU (Inertial Measurement Unit) heading for local maneuvering.
 
-2.5 Capabilities & Degrees of Freedom
+**Simulation-Realism Gap (Latency & Position Uncertainty):**
+A critical design constraint in this simulated environment is the **asynchronous latency** between the ROS 2 control loop and the Gazebo engine. This communication delay introduces a temporal offset between the *perceived* position (sensor data) and the *actual* state of the robot. Consequently, the robot's position is never absolute but rather a probabilistic estimate. The navigation logic incorporates tolerance thresholds to robustly handle this inherent uncertainty, prioritizing safe navigation over pixel-perfect positioning.
 
-Charlie features the following capabilities:
+## 2.6 Capabilities & Degrees of Freedom (DOF)
 
-Autonomous navigation in cluttered indoor environments.
+The system displays a high degree of autonomy, integrating robust indoor navigation with real-time semantic analysis. Its core capabilities include **autonomous exploration** of unknown environments, **proactive obstacle avoidance** using fused sensor data, and **semantic detection** of victims via deep learning models. These behaviors are orchestrated by the Executive Layer, which dynamically switches between exploration and goal-seeking modes based on mission status.
 
-Real‑time obstacle avoidance.
+In terms of kinematics, the platform operates with **2 Active Degrees of Freedom (DOF)**. While the robot exists in a 3D world, its motion is constrained to the 2D ground plane, controlled via longitudinal translation and angular rotation. Efficient path planning algorithms leverage these DOFs to generate smooth trajectories.
 
-Victim detection through visual sensing.
-
-Communication of detected victims to rescuers.
-
-Optional physical actuation if equipped with a micro‑arm.
-
-Degrees of Freedom (DOF):
-
-2 DOF for differential drive (forward/backward and rotation).
-
-+1 DOF if an optional activation arm is installed.
-
-3. Simulator Environment Choice
+# 3. Simulator Environment Choice
 
 The simulation is performed inside a virtual chemical laboratory affected by a toxic leak, modeled in Gazebo Harmonic. The environment includes:
 
-- Interconnected corridors and rooms
+- A single room with some obstacles and human-like targets to simulate victims.
 - Broken chemical vials, containers, and scattered debris placed as navigation obstacles.
-- Potential human-like targets to simulate victims.
-- Dedicated activation zones where the emergency ventilation system may be located.
+- Dedicated control zones where the emergency ventilation system may be located.
 
-Gazebo Harmonic is paired with ROS 2 (Jazzy) to control the robot, manage sensor data, handle navigation (Nav2), and run the perception stack (YOLO).
+Gazebo Harmonic is paired with ROS 2 (Jazzy) to control the robot, manage sensor data, execute custom Behavior Tree-based navigation, and run the perception stack (YOLO).
 
-4. Robot Goal Definition
+# 4. Robot Goal Definition
 
-4.1 Main Goal
+The **primary operational objective** is to deploy an autonomous robotic agent capable of navigating a contaminated laboratory environment to identify and reach the emergency ventilation control unit, thereby imulating the activation of the extraction system.
 
-Charlie’s primary objective is to navigate autonomously through the contaminated laboratory and reach the emergency ventilation control to activate the extraction system.
+## 4.1 Main Goal
 
-4.2 Sub-goals
+Charlie’s core mission is to autonomously traverse the hazardous operational domain, avoiding obstacles and entangled structures, to **localize and reach** the specific activation interface for the ventilation system.
 
-- Detect and avoid chemical debris (broken vials, containers, equipment).
+## 4.2 Sub-goals
 
-- Detect and report human presence, forwarding victim information to rescuers.
+To achieve the main objective, the system must satisfy the following functional sub-goals:
 
-- Safely explore the environment, moving through predefined candidate locations until the correct activation point is found.
+- **Hazard Avoidance:** reliably detect and bypass chemical debris, broken vials, and static obstacles to ensure navigation safety.
 
-- Maintain safe operation in a hazardous environment without human assistance.
+- **Victim Identification:** detect human presence using semantic perception and forward critical location data to rescue teams.
 
-5. Design Methodology
+- **Systematic Exploration:** execute a sequential inspection of predefined candidate locations (Knowledge-Based Search) until the correct activation point is identified.
 
-5.1 Robot Agent Architecture (AI-FCA – Hierarchical Model)
+- **Operational Autonomy:** maintain system integrity and decision-making capabilities in a hazardous environment without direct human teleoperation.
+
+# 5. Design Methodology
+
+## 5.1 Robot Agent Architecture (AI-FCA – Hierarchical Model)
 
 Charlie’s control system is structured according to the Hierarchical Architecture described in Chapter 2 of the AI-FCA textbook. The agent is organized into three coordinated layers, each responsible for a different level of abstraction in perception, decision-making, and action execution.
 
@@ -104,7 +100,7 @@ Responsible for planning and reasoning:
 
 Environment mapping (topological or grid‑based).
 
-Global path planning toward the fire‑suppression activation point.
+Global path planning toward the fire‑suppression control point.
 
 High‑level goal management.
 
@@ -160,17 +156,29 @@ Scalability: architecture supports additional sensors or behaviors.
 
 Real‑time reactivity: low‑latency responses to sudden hazards.
 
-6. Testing protocol. Testing protocol
+# 6. Testing Protocol
 
-come testate sensori
+The system verification strategy is divided into three distinct layers to ensure robust performance across logic, perception, and actuation.
 
-come testate navigazione
+## 6.1 Unit Testing (Decision Logic & Sensor Math)
+The robot's decision-making core (Plan Module) is validated through **Automated Unit Tests** using a dedicated test suite (`test_plan_behaviors.py`). This suite mocks the sensor inputs (Blackboard variables) and verifies that the Behavior Tree transitions to the correct state.
 
-come testate rilevamento fuoco/vittime
+Additionally, the **Perception Logic** is tested via:
+- `test_sense_node.py`: Validates mathematical functions for bounding box analysis and spatial distance estimation.
+- `test_color_detector.py`: A specific **"Smart Test"** suite that uses synthetic images (e.g., pure green squares) to verifying the HSV thresholds and color segmentation logic. 
 
-casi di test principali
+**Note on Human Detection**: We deliberately exclude Unit Tests for the YOLO model (`human_detector.py`) as it relies on a pre-trained neural network. Validating the network's internal weights via unit tests is redundant; instead, its performance is verified during **System Integration** (Section 6.3) and visual debugging.
 
-simulazioni ripetute
+## 6.2 Perception & Sensor Validation
+Perception modules are tested via **Visual Debugging**:
+- **Sensors:** Ultrasonic readings are cross-referenced with Gazebo ground-truth measurements to verify linearity and range configuration.
+- **YOLO/Camera:** The detection pipeline is validated by monitoring the specific debug topic `/sense/debug_image`. This topic provides an **annotated video stream** where the `SenseNode` actively overlays Bounding Boxes and Confidence Scores onto the raw camera feed. Operators use tools like `rqt_image_view` to visually confirm that victims and hazards are correctly classified before the data reaches the planning layer.
+
+## 6.3 System Integration & Navigation
+The final validation phase involves **Full Mission Simulations** in the Gazebo environment:
+- **Navigation Calibration:** Empirical tests are conducted to measure and minimize odometry drift during rotation-heavy maneuvers.
+- **End-to-End Scenarios:** The robot is deployed in randomized starting positions to verify its ability to autonomously complete the mission (find target -> simulate activation) without human intervention.
+
 
 7. Experimental results
 
@@ -192,11 +200,11 @@ The following UML diagrams illustrate the system design, agent behaviors, and in
 
 8.1 Use Case Diagram
 
-Illustrates the main functionalities of Charlie, including navigation, hazard detection, victim reporting, and fire suppression activation.
+Illustrates the main functionalities of Charlie, including navigation, hazard detection, victim reporting, and simulated fire suppression triggering.
 
 8.2 Activity Diagram
 
-Shows the step-by-step activities during a mission, from environment exploration to activation of the fire suppression system.
+Shows the step-by-step activities during a mission, from environment exploration to the simulated activation of the fire suppression system.
 
 8.3 State Machine Diagram
 
