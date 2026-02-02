@@ -78,94 +78,23 @@ To achieve the main objective, the system must satisfy the following functional 
 
 # 5. Design Methodology
 
-## 5.1 Robot Agent Architecture (AI-FCA – Hierarchical Model)
-
-Charlie’s control system is structured according to the Hierarchical Architecture described in Chapter 2 of the AI-FCA textbook. The agent is organized into three coordinated layers, each responsible for a different level of abstraction in perception, decision-making, and action execution.
-
-![alt text](<architecture/overral architecture.drawio.png>)
-
-Reactive Layer (Low Level)
-
-Manages real‑time, safety‑critical behaviors:
-
-Obstacle avoidance using proximity and depth sensors.
-
-Immediate reaction to detected fire hotspots or dangerous heat zones.
-
-Basic motion control for differential drive.
-
-Deliberative Layer (High Level)
-
-Responsible for planning and reasoning:
-
-Environment mapping (topological or grid‑based).
-
-Global path planning toward the fire‑suppression control point.
-
-High‑level goal management.
-
-Executive / Coordination Layer (Middle Level)
-
-Coordinates actions between planning and execution:
-
-Converts plans into sequences of behaviors.
-
-Supervises task execution (exploration, detection, navigation).
-
-Error recovery in case of blocked path or inconsistent sensor data.
-
-5.2 Layer Interactions
-
-Bottom‑up flow: sensor data → reactive responses → structured information for planning.
-
-Top‑down flow: high‑level goals → task decomposition → motor commands.
-
-Continuous feedback loop for robust navigation in hazardous environments.
-
-System Design Approach
-
-Modular decomposition into sensing, perception, mapping, navigation, decision‑making, actuation, and communication modules.
-
-Iterative workflow: specification → prototyping → testing → refinement.
-
-Risk‑aware design prioritizing safety and robustness.
-
-Clear separation of concerns to simplify debugging and testing.
-
-Development Workflow
-
-Initial prototyping of sensors and basic movement.
-
-Implementation of perception pipelines (fire detection, victim detection).
-
-Development of navigation and path‑planning algorithms.
-
-Integration through the executive layer.
-
-Final optimization and stress testing.
-
-Design Criteria
-
-Reliability: the robot must operate under uncertainty and noisy sensor data.
-
-Robustness: ability to adapt to smoke, obstacles, dynamic hazards.
-
-Modularity: each subsystem can be updated or replaced independently.
-
-Scalability: architecture supports additional sensors or behaviors.
-
-Real‑time reactivity: low‑latency responses to sudden hazards.
 
 # 6. Testing Protocol
 
 The system verification strategy is divided into three distinct layers to ensure robust performance across logic, perception, and actuation.
 
 ## 6.1 Unit Testing (Decision Logic & Sensor Math)
-The robot's decision-making core (Plan Module) is validated through **Automated Unit Tests** using a dedicated test suite (`test_plan_behaviors.py`). This suite mocks the sensor inputs (Blackboard variables) and verifies that the Behavior Tree transitions to the correct state.
+The robot's decision-making core (Plan Module) is validated through **Automated Unit Tests** using a dedicated test suite (`test_behaviors.py`). This suite mocks the sensor inputs (Blackboard variables) and verifies that the Behavior Tree transitions to the correct state.
 
 Additionally, the **Perception Logic** is tested via:
-- `test_sense_node.py`: Validates mathematical functions for bounding box analysis and spatial distance estimation.
-- `test_color_detector.py`: A specific **"Smart Test"** suite that uses synthetic images (e.g., pure green squares) to verifying the HSV thresholds and color segmentation logic. 
+- `test_sense_node.py`: Validates geometric helper functions used for detection processing:
+  - **Bounding Box Area Calculation**: Tests both `xywh` (standard) and `xyxy` (YOLO output) formats
+  - **Center Point Extraction**: Computes detection center for zone classification
+  - **Horizontal Zone Detection**: Classifies detections as `left`, `center`, or `right` based on image thirds
+  - **Distance Estimation**: Validates the inverse-square-root model used to estimate object distance from bbox area (`sqrt(SCALE/area)`)
+  - **Ultrasonic Zone Mapping**: Verifies correct sensor selection based on detection zone (`left` → `front_left`, `center` → `front`, `right` → `front_right`)
+  - **Min Area Filtering**: Tests the 2000px² threshold used to filter distant/noisy detections
+- `test_color_detector.py`: A specific **"Smart Test"** suite that uses synthetic images (e.g., pure green squares) to verify the HSV thresholds and color segmentation logic. 
 
 **Note on Human Detection**: We deliberately exclude Unit Tests for the YOLO model (`human_detector.py`) as it relies on a pre-trained neural network. Validating the network's internal weights via unit tests is redundant; instead, its performance is verified during **System Integration** (Section 6.3) and visual debugging.
 
@@ -177,10 +106,10 @@ Perception modules are tested via **Visual Debugging**:
 ## 6.3 System Integration & Navigation
 The final validation phase involves **Full Mission Simulations** in the Gazebo environment:
 - **Navigation Calibration:** Empirical tests are conducted to measure and minimize odometry drift during rotation-heavy maneuvers.
-- **End-to-End Scenarios:** The robot is deployed in randomized starting positions to verify its ability to autonomously complete the mission (find target -> simulate activation) without human intervention.
+- **End-to-End Scenarios:** The robot is deployed in a defined starting position to verify its ability to autonomously complete the mission (find target -> simulate activation) without human intervention.
 
 
-7. Experimental results
+# 7. Experimental results
 
 Da inserire alla fine:
 
@@ -194,19 +123,19 @@ video
 
 log
 
-8. UML Diagrams
+# 8. UML Diagrams
 
 The following UML diagrams illustrate the system design, agent behaviors, and interactions between modules:
 
-8.1 Use Case Diagram
+## 8.1 Use Case Diagram
 
 Illustrates the main functionalities of Charlie, including navigation, hazard detection, victim reporting, and simulated fire suppression triggering.
 
-8.2 Activity Diagram
+## 8.2 Activity Diagram
 
 Shows the step-by-step activities during a mission, from environment exploration to the simulated activation of the fire suppression system.
 
-8.3 State Machine Diagram
+## 8.3 State Machine Diagram
 
 Represents the internal states of Charlie, including Idle, Exploring, Detecting, Navigating, Reporting, and Actuating.
 
