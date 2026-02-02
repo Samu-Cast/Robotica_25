@@ -152,7 +152,7 @@ Realizzato da:
 - Giammarco Ubaldi
 - Samuele Verna
 
-Progetto sviluppato per il corso **ISRLAB - Virtual Robotics Project**.
+Progetto sviluppato per il corso **ISRLAB**.
 
 ---
 
