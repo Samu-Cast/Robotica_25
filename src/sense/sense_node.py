@@ -11,7 +11,9 @@ Publishes:
     - /sense/proximity/front, front_left, front_right (Range) - ultrasonic distances
     - /sense/odometry (Pose2D) - robot position
     - /sense/detection (String) - JSON with current detection (event-driven)
+    - /sense/detection_zone (String) - detection zone (left, center, right)
     - /sense/debug_image (Image) - annotated camera view
+    - /sense/battery (Float32) - battery level
 
 Uses modules:
     - color_detector.py for colored target detection
@@ -48,10 +50,7 @@ class SenseNode(Node):
     Main Sense Node - Publishes specialized ROS2 topics for Plan node
     """
     
-    # Safety thresholds (meters)
-    OBSTACLE_THRESHOLD_FRONT = 0.30
-    OBSTACLE_THRESHOLD_LATERAL = 0.20
-    
+
     # Minimum bbox area to consider a detection (filters out far detections)
     # ~5000 px² is roughly a detection at 3m distance
     MIN_BBOX_AREA = 2000
@@ -332,21 +331,7 @@ class SenseNode(Node):
                 'confidence': 1.0
             })
         
-        # Check for obstacle (proximity-based, no visual detection)
-        front_dist = self.ultrasonic_data.get('front', float('inf'))
-        if front_dist < self.OBSTACLE_THRESHOLD_FRONT:
-            # Only add obstacle if no visual detection is close
-            if not any(c['proximity_distance'] < 0.5 for c in candidates):
-                candidates.append({
-                    'type': 'obstacle',
-                    'color': None,
-                    'bbox_area': 0,
-                    'zone': 'center',
-                    'estimated_distance': front_dist,
-                    'proximity_distance': front_dist,
-                    'confidence': 1.0
-                })
-        
+
         # Select the closest detection (smallest estimated_distance or largest bbox_area)
         if candidates:
             # Sort by bbox_area descending (larger = closer)

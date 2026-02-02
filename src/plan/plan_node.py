@@ -70,11 +70,18 @@ class PlanNode(Node):
         Plan ROS2 Node - Strategic decision layer for Charlie Robot.
         
         Subscribes to:
-            /sense/world_state - JSON with battery, odometry, obstacles, detections, detected_color
+            /sense/odometry - odometry data
+            /sense/proximity/front - front distance sensor
+            /sense/proximity/front_left - front left distance sensor
+            /sense/proximity/front_right - front right distance sensor
+            /sense/detection - detection data
+            /sense/detection_zone - detection zone data
+            /sense/battery - battery data
         
         Publishes to:
             /plan/command - String command for Act (Front, Left, Right, Stop)
             /plan/signals - JSON array of signals (PersonFound, ValveActivated)
+            /plan/bt_status - Behavior Tree status
     """
     
     def __init__(self):
