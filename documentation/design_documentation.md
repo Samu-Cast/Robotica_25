@@ -234,6 +234,52 @@ log
 
 # 8. UML Diagrams
 
+## Behaviors Tree
+*InitialRetreat
+At startup, it saves the robot’s initial pose into the Blackboard as home_position and then moves backward for a fixed distance to leave the spawn platform. It sets plan_action = MOVE_BACKWARD until completion, then issues STOP and sets startup_complete = True.
+
+*BatteryCheck
+Reads battery from the Blackboard and checks whether the charge level is sufficient to operate. It returns SUCCESS if battery > 20%, otherwise FAILURE (triggering the charging branch).
+
+*GoCharge
+When the battery is low, it sets the goal to home_position and decides the next plan_action using the three distance sensors to return safely. It simulates recharging by updating battery and returns SUCCESS once the charge reaches at least 80%.
+
+*CalculateTarget
+Selects the next unvisited target from KNOWN_TARGETS (based on distance) and stores it in current_target. It also accounts for odometry correction (odom_correction) to make pose estimation more reliable.
+
+*AtTarget
+Checks whether the robot has reached the current target by combining color recognition and proximity sensing (ultrasonics). When the target is reached, it applies an odometry correction (dx/dy), appends the target to visited_targets, and if the detected color is red it sets found = "valve".
+
+*MoveToTarget
+Navigates toward current_target with obstacle avoidance and hysteresis to reduce oscillations. It continuously updates plan_action (MOVE_FORWARD / MOVE_FRONT_LEFT / MOVE_FRONT_RIGHT / TURN_*), and when close to the target without seeing the correct color it enters a visual scan phase (rotation).
+
+*SearchObj
+Analyzes detections and detected_color to determine what has been found, using the priority: valve (red) → valve from detections → person → obstacle. It writes the result into found (valve/person/obstacle/None) and returns SUCCESS (non-blocking perception step).
+
+*RecognitionPerson
+Checks whether found == "person" in the Blackboard. Returns SUCCESS if a person has been detected (used to trigger reporting/avoidance behavior).
+
+*SignalPerson
+When a person is detected, it appends the "PersonFound" signal to the signals list in the Blackboard. This logs the event and simulates notifying the rescue team.
+
+*GoAroundP
+Performs “smart” avoidance of a person based on detection_zone (left/right/center), choosing the opposite direction and setting plan_action. On its first activation, it also saves human_position (robot pose) to allow returning to the person later.
+
+*RecognitionObstacle
+Checks whether found == "obstacle" in the Blackboard and returns SUCCESS when a generic obstacle is detected. This activates the obstacle avoidance branch.
+
+*GoAroundO
+Avoids an obstacle based on detection_zone, setting plan_action to steer to the opposite side. It is a fast reactive response and does not change the global mission objective.
+
+*RecognitionValve
+Checks whether found == "valve" and returns SUCCESS when the valve has been identified. This condition terminates the target-search loop.
+
+*ActiveValve
+Simulates valve activation: it appends "ValveActivated" to signals, sets plan_action = "ACTIVATE_VALVE", and sets mission_complete = True. This node represents completion of the main objective.
+
+*GoToHuman
+After activation, it navigates back to human_position in three phases: initial retreat, odometry-based navigation, and visual approach when close. It sets plan_action accordingly and returns SUCCESS when the person is reached (ultrasonic distance below threshold).
+
 The following UML diagrams illustrate the system design, agent behaviors, and interactions between modules:
 
 ## 8.1 Use Case Diagram
