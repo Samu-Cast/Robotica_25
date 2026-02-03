@@ -97,9 +97,11 @@ To achieve the main objective, the system must satisfy the following functional 
 
 # 5. Design Methodology
 
-## 5.1 
+## 5.1 Overral Architecture
 
-## 5.2 
+![Architecture Diagram](overall_architecture.jpg)
+
+## 5.2 Architecture Layers
 1. **Perception Layer (Sense)**
 
 The Perception Layer is implemented inside the `charlie_sense` Docker container and is responsible for acquiring and processing raw sensory data coming from the simulated environment.
