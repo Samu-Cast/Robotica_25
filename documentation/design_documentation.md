@@ -98,7 +98,7 @@ Each detector processes raw sensory inputs independently and produces high-level
 
 This layered design allows perception algorithms to evolve independently from decision-making logic.
 
-1. **Planning Layer (Plan)**
+2. **Planning Layer (Plan)**
 
 The Planning Layer is hosted inside the `charlie_plan` Docker container and represents the cognitive core of the robotic agent.
 
@@ -114,7 +114,7 @@ Based on this information, the Behavior Tree selects and activates the appropria
 
 The use of a Behavior Tree provides modularity, reactivity, and clear control flow, allowing the system to dynamically switch behaviors while maintaining robustness in uncertain environments.
 
-1. **Action Layer (Act)**
+3. **Action Layer (Act)**
 
 The Action Layer is implemented within the `charlie_act` Docker container and is responsible for transforming high-level decisions into executable robot commands.
 
