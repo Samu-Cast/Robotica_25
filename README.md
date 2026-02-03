@@ -1,6 +1,6 @@
 # Charlie Robot - Autonomous Hazardous Environment Navigation
 
-![iRobot Create 3](documentation/irobot.jpg)
+![iRobot Create 3](documentation/robot_body.png)
 
 ## 📋 Descrizione del Progetto
 
