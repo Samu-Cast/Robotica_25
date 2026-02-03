@@ -22,6 +22,7 @@ The robot's perception system is architected around a multi-modal sensor suite, 
 
 ### Environmental Perception (External Sensing)
 Primary semantic understanding is driven by a front-facing **RGB Camera**, which feeds visual data into a **YOLO-based neural network** for the detection of critical entities such as victims and hazard source control mechanisms. Complementing the visual system is an array of **three ultrasonic sensors** (front, front-left, front-right). This configuration enables a multi-layered obstacle avoidance strategy, providing mid-range spatial awareness for maneuvering and wall-following behaviors.
+![Ultrasonic Sensors](ultrasonic_sensors.png)
 
 ### Internal State Monitoring (Proprioception)
 For localization and odometry, the platform relies on an **Inertial Measurement Unit (IMU)** and high-resolution **wheel encoders**. The fusion of inertial data (linear acceleration and angular velocity) with wheel odometry allows for accurate dead-reckoning navigation, which is indispensable for maintaining an estimate of the robot's pose map-frame.
@@ -237,6 +238,7 @@ A complete video recording of the simulation execution demonstrating the robot's
 ---
 ## 7.3 Logs analysis
 
+**Startup and Initial Retreat**
 ```
 charlie_plan        | [PLAN] HOME SAVED @ (-0.00, -0.00)
 charlie_plan        | [PLAN] RETREAT START (0.5m)...
@@ -246,7 +248,10 @@ charlie_plan        | [PLAN] RETREAT: 25% (0.22m)
 charlie_plan        | [PLAN] RETREAT: 50% (0.29m)
 charlie_plan        | [PLAN] RETREAT COMPLETE (0.50m) - Navigation started
 ```
+At start, the robot stores its initial pose as home_position and performs a controlled backward motion to leave the spawn platform.
+The percept–command trace shows a smooth retreat progression (0% → 50% → complete), followed by a transition to navigation mode, confirming correct initialization and action sequencing.
 
+**Target navigation and human avoidance**
 ```
 charlie_plan        | [PLAN] NEW TARGET: BLUE @ (0.00, -4.00) | Dist: 4.03m
 charlie_plan        | [PLAN] NAV -> BLUE | Dist: 4.03m | Ang: -83deg | MOVE_FRONT_RIGHT
@@ -267,6 +272,11 @@ charlie_plan        | [AVOID HUMAN] ULTRASONIC: L=0.59<0.6 -> MOVE_FORWARD
 charlie_sense       | [INFO] [1770141468.507732095] [sense_node]: Detection: none (color=None, zone=None)
 charlie_plan        | [AVOID] PATH TO BLUE CLEAR - resuming navigation
 ```
+The robot starts navigating toward the BLUE target using angle-based steering commands.
+Upon detecting a person, it switches to human-avoidance behavior, adjusting its motion based on ultrasonic readings.
+Once the path is clear, navigation toward the target is correctly resumed.
+
+**Target Approach and Odometry Correction (BLUE)**
 
 ```
 charlie_plan        | [PLAN] COLOR CENTERED - advancing to BLUE...
@@ -277,7 +287,11 @@ charlie_plan        | [ODOM]   Raw pos: (0.31, -3.82)
 charlie_plan        | [ODOM]   Known:   (0.00, -4.00)
 charlie_plan        | [ODOM]   Offset:  (dx=-0.31, dy=-0.18)
 ```
+Once the target color is centered in the camera view, the robot advances straight toward the BLUE target.
+Upon reaching proximity, an odometry correction is applied using the known landmark position, reducing accumulated drift and improving localization accuracy.
 
+
+**Valve detection, mission completion, and task reconfiguration**
 ```
 charlie_plan        | [PLAN] COLOR CENTERED - advancing to RED...
 charlie_act         | [INFO] [1770141591.796254630] [act_node]: [DEBUG][Act] ⬆️ Comando: Front | Stato: FRONT_LEFT → FRONT
@@ -299,7 +313,12 @@ charlie_act         | [INFO] [1770141595.598282396] [act_node]: [DEBUG][Act] ⬇
 charlie_plan        | [PLAN] GO TO HUMAN - Phase 2: Navigating to human @ (-0.25, -0.22)
 charlie_plan        | [PLAN] GO TO HUMAN -> (-0.25, -0.22) | Dist: 6.75m | Ang: -142deg
 ```
+The red target is visually detected and centered, guiding the robot to approach it with fine steering adjustments.
+Once the proximity threshold is reached, the target is identified as the valve, an odometry correction is applied, and the main mission is declared complete through the valve activation command.
+After mission completion, the planner switches objectives and initiates the return-to-human procedure, starting with a retreat maneuver and then navigating toward the previously stored human position.
 
+
+**Human reaching**
 ```
 charlie_sense       | [INFO] [1770141653.505775891] [sense_node]: Detection: person (color=None, zone=center)
 charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 999.00m | MOVE_FORWARD
@@ -315,8 +334,13 @@ charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 0.6
 charlie_act         | [INFO] [1770141684.397115598] [act_node]: [DEBUG][Act] 🛑 Comando: Stop | Stato: FRONT → STOP
 charlie_plan        | [PLAN] HUMAN REACHED via visual approach (ultrasonic: 0.31m)
 ```
+After re-detecting the person, the robot switches to a visual homing strategy, using the camera to keep the person centered in the field of view.
+As the ultrasonic distance progressively decreases, the planner maintains forward motion until the safety threshold is reached.
+The robot then issues a stop command, confirming successful and safe approach to the human.
 
 # 8. UML Diagrams
+
+![Behaviors Tree](BTree/btreee.png)
 
 ## Behaviors Tree
 *InitialRetreat
