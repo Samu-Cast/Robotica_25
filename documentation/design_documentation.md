@@ -80,7 +80,55 @@ To achieve the main objective, the system must satisfy the following functional 
 
 # 5. Design Methodology
 
+## 5.1 
 
+## 5.2 
+1. **Perception Layer (Sense)**
+
+The Perception Layer is implemented inside the `charlie_sense` Docker container and is responsible for acquiring and processing raw sensory data coming from the simulated environment.
+
+At its core, the `sense_node` subscribes to raw data streams provided by the ROS 2 Jazzy middleware, which interfaces with the Gazebo Harmonic simulator. These data include camera images and proximity sensor readings.
+
+The perception process is further decomposed into specialized detection modules:
+
+- **Human Detector**, responsible for identifying human-like targets (victims) using visual data.
+- **Color Detector**, dedicated to recognizing colored elements in the environment, such as the red emergency activation target.
+
+Each detector processes raw sensory inputs independently and produces high-level perceptual information. The `sense_node` aggregates these outputs and publishes semantic detections to the planning layer.
+
+This layered design allows perception algorithms to evolve independently from decision-making logic.
+
+1. **Planning Layer (Plan)**
+
+The Planning Layer is hosted inside the `charlie_plan` Docker container and represents the cognitive core of the robotic agent.
+
+This layer is built around three main components:
+
+- **Plan Node**, which acts as the interface between perception and action.
+- **Behavior Tree**, implementing the executive control logic.
+- **Blackboard**, a shared memory structure used for data exchange and state synchronization.
+
+The Plan Node receives perceptual detections from the Sense Layer and stores relevant information in the Blackboard. The Behavior Tree periodically ticks and queries the Blackboard to evaluate the current world state and mission progress.
+
+Based on this information, the Behavior Tree selects and activates the appropriate behavior (e.g., exploration, obstacle avoidance, target search, or activation).
+
+The use of a Behavior Tree provides modularity, reactivity, and clear control flow, allowing the system to dynamically switch behaviors while maintaining robustness in uncertain environments.
+
+1. **Action Layer (Act)**
+
+The Action Layer is implemented within the `charlie_act` Docker container and is responsible for transforming high-level decisions into executable robot commands.
+
+The `act_node` receives abstract action requests from the Planning Layer, such as movement directives or orientation adjustments. These actions are translated into low-level command messages compatible with the ROS 2 control interface.
+
+By decoupling decision-making from actuation, this layer ensures that changes in robot hardware or control strategies do not affect the planning logic, improving maintainability and portability.
+
+**Simulation and Environment Interface**
+
+The simulated environment is managed by the `ros2_jazzy_sim_git` Docker container, which integrates ROS 2 Jazzy with Gazebo Harmonic.
+
+Gazebo Harmonic simulates the physical environment, obstacles, and targets, while ROS 2 acts as the communication middleware, handling message passing between the robot’s internal modules.
+
+Sensor data generated in Gazebo are forwarded through ROS 2 to the Sense Layer, while motion commands produced by the Action Layer are executed within the simulator, closing the Sense–Plan–Act loop.
 # 6. Testing Protocol
 
 The system verification strategy is divided into three distinct layers to ensure robust performance across logic, perception, and actuation.
