@@ -14,6 +14,8 @@ During its mission, Charlie identifies chemical debris, laboratory containers, a
 
 The robotic platform selected for this simulated mission is the **iRobot Create 3**, a widely standardized mobile robot in academic research for autonomous navigation. This platform is characterized by a **differential drive kinematics configuration**, which imposes non-holonomic constraints on the robot's motion—specifically, the inability to move instantaneously in the lateral direction. Despite this constraint, the differential drive system allows for a **zero turning radius**, granting the robot exceptional maneuverability in tight, clutter-filled environments such as the simulated hazardous laboratory. The robot features a compact, circular footprint with compact dimensions, ensuring minimal inertial impact during dynamic maneuvers. Its native integration with **ROS 2** (Robot Operating System) provides a robust middleware layer for high-level control, facilitating the implementation of complex navigation and perception stacks.
 
+The simulation model is based on the official **`irobot_create3_sim`** library, developed and maintained by iRobot. This open-source package provides the complete robot description (URDF/SDF), Gazebo plugins, and ROS 2 interfaces required for accurate simulation. The library includes pre-configured sensor models (bumpers, cliff sensors, wheel encoders, IMU) and actuator interfaces, ensuring high fidelity between the simulated behavior and the physical Create 3 hardware.
+
 ## 2.2 Sensors Set
 
 The robot's perception system is architected around a multi-modal sensor suite, categorized into **Environmental** and **Internal** sensory channels to ensure robust environmental awareness and precise state estimation.
@@ -57,6 +59,21 @@ The simulation is performed inside a virtual chemical laboratory affected by a t
 - Dedicated control zones where the emergency ventilation system may be located.
 
 Gazebo Harmonic is paired with ROS 2 (Jazzy) to control the robot, manage sensor data, execute custom Behavior Tree-based navigation, and run the perception stack (YOLO).
+
+## 3.1 ROS 2 as Message Broker
+
+The inter-module communication within the system relies on **ROS 2** acting as a **distributed message broker**. ROS 2 implements a **publish/subscribe** messaging pattern, where nodes exchange data through named channels called **topics**. Each topic is strongly typed with a predefined message structure (e.g., `sensor_msgs/Range`, `geometry_msgs/Twist`, `std_msgs/String`).
+
+Key topics used in the system include:
+
+| Topic | Message Type | Publisher | Subscriber | Description |
+|-------|--------------|-----------|------------|-------------|
+| `/proximity/*` | `sensor_msgs/Range` | Sense | Plan | Ultrasonic sensor readings |
+| `/odom` | `geometry_msgs/Pose2D` | Sense | Plan | Robot odometry (position/orientation) |
+| `/detections` | `std_msgs/String` (JSON) | Sense | Plan | Detected objects (humans, targets) |
+| `/cmd_vel` | `geometry_msgs/Twist` | Act | Gazebo | Velocity commands to the robot |
+
+This architecture ensures **asynchronous**, **loosely-coupled** communication between the Sense, Plan, and Act layers, enabling each module to operate independently within its own Docker container while maintaining real-time data exchange.
 
 # 4. Robot Goal Definition
 
@@ -161,15 +178,57 @@ The final validation phase involves **Full Mission Simulations** in the Gazebo e
 
 # 7. Experimental results
 
-Da inserire alla fine:
+## 7.1 Sensor and Actuator Calibration
 
-calibrazioni
+The system's performance relies on empirically tuned calibration parameters for both perception and actuation modules. The following tables summarize the key calibration values adopted after iterative testing in the Gazebo simulation environment.
 
-grafici
+### Ultrasonic Sensors Calibration
 
-statistiche
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Field of View | 0.26 rad (~15°) | Angular width of each ultrasonic cone |
+| Min Range | 0.02 m | Minimum detectable distance |
+| Max Range | 4.0 m | Maximum reliable detection distance |
+| Update Rate | 10 Hz | Publishing frequency to `/sense/proximity/*` |
 
-video
+### Camera and Detection Calibration
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| Image Resolution | 640 × 480 px | Camera frame dimensions |
+| `MIN_BBOX_AREA` | 2000 px² | Minimum bounding box area to filter distant/noisy detections |
+| `BBOX_DISTANCE_SCALE` | 40000 px² | Reference area at 1m distance for distance estimation |
+| YOLO Skip Frames | 5 | Process 1 every 5 frames for human detection (CPU optimization) |
+| Color Skip Frames | 2 | Process 1 every 2 frames for color detection |
+
+**Distance Estimation Model:**
+The distance from a detected object is estimated using an inverse-square-root relationship based on bounding box area:
+
+```
+distance ≈ √(BBOX_DISTANCE_SCALE / bbox_area)
+```
+
+A target filling approximately 1/4 of the image (~80000 px²) corresponds to roughly 0.5m distance.
+
+### Actuator Velocity Calibration
+
+| Command | Linear Velocity (m/s) | Angular Velocity (rad/s) |
+|---------|----------------------|-------------------------|
+| Front | +0.2 | 0.0 |
+| Back | -0.2 | 0.0 |
+| Left | 0.0 | +0.5 |
+| Right | 0.0 | -0.5 |
+| FrontLeft | +0.15 | +0.25 |
+| FrontRight | +0.15 | -0.25 |
+| Stop | 0.0 | 0.0 |
+
+**Control Loop Frequency:** 10 Hz (0.1s period)
+
+These velocity values were calibrated to balance responsiveness with stability, preventing overshooting during rotation maneuvers and ensuring smooth obstacle avoidance transitions.
+
+---
+
+
 
 log
 

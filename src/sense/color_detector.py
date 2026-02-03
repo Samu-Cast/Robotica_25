@@ -30,12 +30,7 @@ class ColorDetector:
                 'lower': np.array([0, 150, 50]),
                 'upper': np.array([10, 255, 255]),
                 'draw_color': (0, 0, 255)
-            },
-            'black': {
-                'lower': np.array([0, 0, 0]),
-                'upper': np.array([180, 100, 50]),  # Low saturation, low value
-                'draw_color': (80, 80, 80)  # Dark gray for visibility
-            },
+            }
         }
         self.min_area = 2000  # Minimum contour area to consider
     
