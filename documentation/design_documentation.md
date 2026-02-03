@@ -227,10 +227,92 @@ A target filling approximately 1/4 of the image (~80000 px²) corresponds to rou
 These velocity values were calibrated to balance responsiveness with stability, preventing overshooting during rotation maneuvers and ensuring smooth obstacle avoidance transitions.
 
 ---
+## 7.2 Simulation Video
+
+A complete video recording of the simulation execution demonstrating the robot's autonomous behavior can be found in the `documentation/` folder.
 
 
+---
+## 7.3 Logs analysis
 
-log
+```
+charlie_plan        | [PLAN] HOME SAVED @ (-0.00, -0.00)
+charlie_plan        | [PLAN] RETREAT START (0.5m)...
+charlie_plan        | [PLAN] RETREAT: 0% (0.00m)
+charlie_act         | [INFO] [1770141447.896185191] [act_node]: [DEBUG][Act] ⬇️ Comando: Back | Stato: STOP → BACK
+charlie_plan        | [PLAN] RETREAT: 25% (0.22m)
+charlie_plan        | [PLAN] RETREAT: 50% (0.29m)
+charlie_plan        | [PLAN] RETREAT COMPLETE (0.50m) - Navigation started
+```
+
+```
+charlie_plan        | [PLAN] NEW TARGET: BLUE @ (0.00, -4.00) | Dist: 4.03m
+charlie_plan        | [PLAN] NAV -> BLUE | Dist: 4.03m | Ang: -83deg | MOVE_FRONT_RIGHT
+charlie_act         | [INFO] [1770141452.096799122] [act_node]: [DEBUG][Act] ↗️ Comando: FrontRight | Stato: BACK → FRONT_RIGHT
+charlie_plan        | [PLAN] NAV -> BLUE | Dist: 3.90m | Ang: -48deg | MOVE_FRONT_RIGHT
+charlie_plan        | [INFO] [1770141458.312852924] [plan_node]: HUMAN POSITION SAVED @ (-0.25, -0.22)
+charlie_sense       | [INFO] [1770141458.312250753] [sense_node]: Detection: person (color=None, zone=right)
+charlie_sense       | [INFO] [1770141460.413270938] [sense_node]: Detection: person (color=None, zone=center)
+charlie_act         | [INFO] [1770141460.596633522] [act_node]: [DEBUG][Act] ⬆️ Comando: Front | Stato: FRONT_RIGHT → FRONT
+charlie_plan        | [PLAN] NAV -> BLUE | Dist: 3.24m | Ang: +12deg | MOVE_FORWARD
+charlie_plan        | [AVOID HUMAN] ULTRASONIC: C=0.78<0.8 -> TURN_RIGHT
+charlie_act         | [INFO] [1770141465.196201598] [act_node]: [DEBUG][Act] ➡️ Comando: Right | Stato: FRONT → RIGHT
+charlie_plan        | [AVOID HUMAN] ULTRASONIC: C=0.76<0.8 -> TURN_RIGHT
+charlie_plan        | [AVOID HUMAN] ULTRASONIC: C=0.64<0.8 -> TURN_RIGHT
+charlie_sense       | [INFO] [1770141467.113132846] [sense_node]: Detection: person (color=None, zone=left)
+charlie_act         | [INFO] [1770141467.995788290] [act_node]: [DEBUG][Act] ⬆️ Comando: Front | Stato: RIGHT → FRONT
+charlie_plan        | [AVOID HUMAN] ULTRASONIC: L=0.59<0.6 -> MOVE_FORWARD
+charlie_sense       | [INFO] [1770141468.507732095] [sense_node]: Detection: none (color=None, zone=None)
+charlie_plan        | [AVOID] PATH TO BLUE CLEAR - resuming navigation
+```
+
+```
+charlie_plan        | [PLAN] COLOR CENTERED - advancing to BLUE...
+charlie_act         | [INFO] [1770141485.895701219] [act_node]: [DEBUG][Act] ⬆️ Comando: Front | Stato: FRONT_LEFT → FRONT
+charlie_plan        | [PLAN] TARGET REACHED: BLUE (sensor: 0.29m) | Color: blue
+charlie_plan        | [ODOM] CORRECTION APPLIED at BLUE:
+charlie_plan        | [ODOM]   Raw pos: (0.31, -3.82)
+charlie_plan        | [ODOM]   Known:   (0.00, -4.00)
+charlie_plan        | [ODOM]   Offset:  (dx=-0.31, dy=-0.18)
+```
+
+```
+charlie_plan        | [PLAN] COLOR CENTERED - advancing to RED...
+charlie_act         | [INFO] [1770141591.796254630] [act_node]: [DEBUG][Act] ⬆️ Comando: Front | Stato: FRONT_LEFT → FRONT
+charlie_sense       | [INFO] [1770141595.425642106] [sense_node]: Detection: target (color=red, zone=right)
+charlie_act         | [INFO] [1770141595.495301236] [act_node]: [DEBUG][Act] ↗️ Comando: FrontRight | Stato: FRONT → FRONT_RIGHT
+charlie_plan        | [PLAN] TARGET REACHED: RED (sensor: 0.18m) | Color: red
+charlie_plan        | [ODOM] CORRECTION APPLIED at RED:
+charlie_plan        | [ODOM]   Raw pos: (-6.67, -2.71)
+charlie_plan        | [ODOM]   Known:   (-6.50, -3.00)
+charlie_plan        | [ODOM]   Offset:  (dx=0.17, dy=-0.29)
+charlie_plan        | [PLAN] VALVE FOUND!
+charlie_plan        | 
+charlie_plan        | [PLAN] =====================================
+charlie_plan        | [PLAN] MISSION COMPLETE - VALVE ACTIVATED!
+charlie_plan        | [PLAN] =====================================
+charlie_plan        | 
+charlie_plan        | [PLAN] GO TO HUMAN - Phase 1: Retreating from wall...
+charlie_act         | [INFO] [1770141595.598282396] [act_node]: [DEBUG][Act] ⬇️ Comando: Back | Stato: FRONT_RIGHT → BACK
+charlie_plan        | [PLAN] GO TO HUMAN - Phase 2: Navigating to human @ (-0.25, -0.22)
+charlie_plan        | [PLAN] GO TO HUMAN -> (-0.25, -0.22) | Dist: 6.75m | Ang: -142deg
+```
+
+```
+charlie_sense       | [INFO] [1770141653.505775891] [sense_node]: Detection: person (color=None, zone=center)
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 999.00m | MOVE_FORWARD
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 999.00m | MOVE_FORWARD
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 999.00m | MOVE_FORWARD
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 999.00m | MOVE_FORWARD
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 999.00m | MOVE_FORWARD
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 999.00m | MOVE_FORWARD
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 1.62m | MOVE_FORWARD
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 1.03m | MOVE_FORWARD
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 0.87m | MOVE_FORWARD
+charlie_plan        | [PLAN] VISUAL APPROACH: Person detected (center) | US: 0.61m | MOVE_FORWARD
+charlie_act         | [INFO] [1770141684.397115598] [act_node]: [DEBUG][Act] 🛑 Comando: Stop | Stato: FRONT → STOP
+charlie_plan        | [PLAN] HUMAN REACHED via visual approach (ultrasonic: 0.31m)
+```
 
 # 8. UML Diagrams
 
