@@ -407,28 +407,3 @@ Simulates valve activation: it appends "ValveActivated" to signals, sets plan_ac
 *GoToHuman
 After activation, it navigates back to human_position in three phases: initial retreat, odometry-based navigation, and visual approach when close. It sets plan_action accordingly and returns SUCCESS when the person is reached (ultrasonic distance below threshold).
 
-
-
-9. Non-functional Requirements
-
-Charlie’s software and hardware system must comply with the following non-functional requirements to ensure robustness, reliability, and maintainability:
-
-All project files must be stored in the private MS Teams group channel.
-
-The system must support Dockerized multi-process deployment.
-
-A message broker system must be adopted to manage inter-process communication and ensure asynchronous, reliable messaging.
-
-A centralized logging system must be implemented to record sensor readings, commands, and system events.
-
-A GUI must allow real-time monitoring of sensor data and robot perceptions (simulated time is acceptable).
-
-A shared software repository must be used to coordinate development and version control.
-
-A ReadMe.md file must provide installation instructions and testing procedures.
-
-10. Final Presentation
-
-The final presentation should include slides and videos lasting approximately 15 minutes, followed by a Q&A session.
-
-Every group member must describe their role and contributions during the Q&A session.
