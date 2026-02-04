@@ -150,7 +150,22 @@ Gazebo Harmonic simulates the physical environment, obstacles, and targets, whil
 
 Sensor data generated in Gazebo are forwarded through ROS 2 to the Sense Layer, while motion commands produced by the Action Layer are executed within the simulator, closing the Sense–Plan–Act loop.
 
+## 5.3 ROS Graphs
+
+**ROS2 Graph without simulator**
+
 ![ROSGraphSPA](images/rosgraph_no_sim.png)
+
+The ROS 2 computation graph above illustrates the **Sense–Plan–Act** architecture implemented through three custom nodes. The `/sense_node` publishes processed sensor data on dedicated topics: `/sense/battery` for battery status, `/sense/detection` and `/sense/detection_zone` for YOLO-based detections, `/sense/odometry` for robot pose estimation, and `/sense/proximity/*` for ultrasonic sensor readings. The `/plan_node` subscribes to all sensory topics, executes the Behavior Tree logic, and publishes high-level movement commands on `/plan/command`. Finally, the `/act_node` receives these commands and translates them into velocity references for the robot actuators. This modular topology ensures clean separation of concerns and enables independent development and testing of each layer.
+
+
+**Complete ROS2 Graph**
+
+![ROSGraph completo](images/rosgraph_completo.png)
+
+The complete ROS2 graph illustrates the interaction between the three custom nodes and the Gazebo simulator. The simulator publishes sensor data on various topics, and the robot **odometry** through the `diff_drive_controller` node that publishes on the topic `/odom`, which are then processed by the Sense Layer. The Plan Layer subscribes to the Sense Layer's output and publishes commands to the Act Layer, which in turn controls the robot's actuators in the simulator by publishing on the topic `/cmd_vel`.
+
+
 
 # 6. Testing Protocol
 
@@ -341,19 +356,12 @@ After re-detecting the person, the robot switches to a visual homing strategy, u
 As the ultrasonic distance progressively decreases, the planner maintains forward motion until the safety threshold is reached.
 The robot then issues a stop command, confirming successful and safe approach to the human.
 
-## 7.3 Acquired data analysis
+# 8. Diagrams
 
-![ROSGraph](images/rosgraph_completo.png)
-
-The ROS 2 computation graph highlights the role of the /odom topic as a key link between the low-level motion controller and the perception layer.
-Odometry data published by the diffdrive_controller are consumed by the sense_node, where they are used to estimate the robot pose and support perception-driven behaviors.
-This connection ensures continuous feedback between actuation and sensing, enabling closed-loop navigation and consistent state estimation throughout the Sense–Plan–Act cycle.
-
-# 8. UML Diagrams
+## 8.1 Behaviors Tree
 
 ![Behaviors Tree](images/btreee.png)
 
-## Behaviors Tree
 *InitialRetreat
 At startup, it saves the robot’s initial pose into the Blackboard as home_position and then moves backward for a fixed distance to leave the spawn platform. It sets plan_action = MOVE_BACKWARD until completion, then issues STOP and sets startup_complete = True.
 
@@ -399,33 +407,7 @@ Simulates valve activation: it appends "ValveActivated" to signals, sets plan_ac
 *GoToHuman
 After activation, it navigates back to human_position in three phases: initial retreat, odometry-based navigation, and visual approach when close. It sets plan_action accordingly and returns SUCCESS when the person is reached (ultrasonic distance below threshold).
 
-The following UML diagrams illustrate the system design, agent behaviors, and interactions between modules:
 
-## 8.1 Use Case Diagram
-
-Illustrates the main functionalities of Charlie, including navigation, hazard detection, victim reporting, and simulated fire suppression triggering.
-
-## 8.2 Activity Diagram
-
-Shows the step-by-step activities during a mission, from environment exploration to the simulated activation of the fire suppression system.
-
-## 8.3 State Machine Diagram
-
-Represents the internal states of Charlie, including Idle, Exploring, Detecting, Navigating, Reporting, and Actuating.
-
-8.4 Architecture Diagram
-
-Visualizes the hierarchical control layers: Reactive, Executive, Deliberative, and their interactions with sensors, actuators, and the communication module.
-
-Diagrams to be created in the appropriate UML tool; placeholders are present in this document for illustration.
-
-Use case UML
-
-Activity diagram
-
-State machine del robot
-
-Architecture diagram
 
 9. Non-functional Requirements
 
