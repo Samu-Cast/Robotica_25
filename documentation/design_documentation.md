@@ -22,7 +22,7 @@ The robot's perception system is architected around a multi-modal sensor suite, 
 
 ### Environmental Perception (External Sensing)
 Primary semantic understanding is driven by a front-facing **RGB Camera**, which feeds visual data into a **YOLO-based neural network** for the detection of critical entities such as victims and hazard source control mechanisms. Complementing the visual system is an array of **three ultrasonic sensors** (front, front-left, front-right). This configuration enables a multi-layered obstacle avoidance strategy, providing mid-range spatial awareness for maneuvering and wall-following behaviors.
-![Ultrasonic Sensors](ultrasonic_sensors.png)
+![Ultrasonic Sensors](images/ultrasonic_sensors.png)
 
 ### Internal State Monitoring (Proprioception)
 For localization and odometry, the platform relies on an **Inertial Measurement Unit (IMU)** and high-resolution **wheel encoders**. The fusion of inertial data (linear acceleration and angular velocity) with wheel odometry allows for accurate dead-reckoning navigation, which is indispensable for maintaining an estimate of the robot's pose map-frame.
@@ -33,7 +33,7 @@ Actuation is governed by two independent DC motors driving the main wheels, impl
 
 ## 2.4 Body Shape
 
-![iRobot Create 3](robot_body.png)
+![iRobot Create 3](images/robot_body.png)
 
 The morphological design of the robot features a **cylindrical chassis** with a low vertical profile. This axially symmetric shape offers significant algorithmic advantages for path planning and collision checking. Since the robot's collision footprint is invariant under rotation, the motion planner can treat the robot as a simple circle in the configuration space, drastically simplifying the computational complexity of obstacle avoidance and path generation. Furthermore, the absence of protruding corners significantly reduces the risk of entanglement with environmental clutter, enhancing the robust execution of autonomous exploration tasks.
 
@@ -100,10 +100,10 @@ To achieve the main objective, the system must satisfy the following functional 
 
 ## 5.1 Overral Architecture
 
-![Architecture Diagram](overall_architecture.jpg)
+![Architecture Diagram](images/overall_architecture.jpg)
 
 ## 5.2 Architecture Layers
-1. **Perception Layer (Sense)**
+**Perception Layer (Sense)**
 
 The Perception Layer is implemented inside the `charlie_sense` Docker container and is responsible for acquiring and processing raw sensory data coming from the simulated environment.
 
@@ -118,15 +118,15 @@ Each detector processes raw sensory inputs independently and produces high-level
 
 This layered design allows perception algorithms to evolve independently from decision-making logic.
 
-2. **Planning Layer (Plan)**
+**Planning Layer (Plan)**
 
 The Planning Layer is hosted inside the `charlie_plan` Docker container and represents the cognitive core of the robotic agent.
 
 This layer is built around three main components:
 
-- **Plan Node**, which acts as the interface between perception and action.
-- **Behavior Tree**, implementing the executive control logic.
-- **Blackboard**, a shared memory structure used for data exchange and state synchronization.
+- Plan Node, which acts as the interface between perception and action.
+- Behavior Tree, implementing the executive control logic.
+- Blackboard, a shared memory structure used for data exchange and state synchronization.
 
 The Plan Node receives perceptual detections from the Sense Layer and stores relevant information in the Blackboard. The Behavior Tree periodically ticks and queries the Blackboard to evaluate the current world state and mission progress.
 
@@ -134,7 +134,7 @@ Based on this information, the Behavior Tree selects and activates the appropria
 
 The use of a Behavior Tree provides modularity, reactivity, and clear control flow, allowing the system to dynamically switch behaviors while maintaining robustness in uncertain environments.
 
-3. **Action Layer (Act)**
+**Action Layer (Act)**
 
 The Action Layer is implemented within the `charlie_act` Docker container and is responsible for transforming high-level decisions into executable robot commands.
 
@@ -149,6 +149,9 @@ The simulated environment is managed by the `ros2_jazzy_sim_git` Docker containe
 Gazebo Harmonic simulates the physical environment, obstacles, and targets, while ROS 2 acts as the communication middleware, handling message passing between the robot’s internal modules.
 
 Sensor data generated in Gazebo are forwarded through ROS 2 to the Sense Layer, while motion commands produced by the Action Layer are executed within the simulator, closing the Sense–Plan–Act loop.
+
+![ROSGraphSPA](images/rosgraph_no_sim.png)
+
 # 6. Testing Protocol
 
 The system verification strategy is divided into three distinct layers to ensure robust performance across logic, perception, and actuation.
@@ -338,9 +341,17 @@ After re-detecting the person, the robot switches to a visual homing strategy, u
 As the ultrasonic distance progressively decreases, the planner maintains forward motion until the safety threshold is reached.
 The robot then issues a stop command, confirming successful and safe approach to the human.
 
+## 7.3 Acquired data analysis
+
+![ROSGraph](images/rosgraph_completo.png)
+
+The ROS 2 computation graph highlights the role of the /odom topic as a key link between the low-level motion controller and the perception layer.
+Odometry data published by the diffdrive_controller are consumed by the sense_node, where they are used to estimate the robot pose and support perception-driven behaviors.
+This connection ensures continuous feedback between actuation and sensing, enabling closed-loop navigation and consistent state estimation throughout the Sense–Plan–Act cycle.
+
 # 8. UML Diagrams
 
-![Behaviors Tree](BTree/btreee.png)
+![Behaviors Tree](images/btreee.png)
 
 ## Behaviors Tree
 *InitialRetreat
