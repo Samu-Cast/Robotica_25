@@ -212,6 +212,17 @@ The system's performance relies on empirically tuned calibration parameters for 
 | Max Range | 4.0 m | Maximum reliable detection distance |
 | Update Rate | 10 Hz | Publishing frequency to `/sense/proximity/*` |
 
+**Avoidance Thresholds:**
+
+The obstacle avoidance behavior uses different distance thresholds depending on whether the detected entity is a human or a generic obstacle, allowing for larger safety margins when humans are involved.
+
+| Entity Type | Front Sensor Threshold | Side Sensors Threshold | Description |
+|-------------|------------------------|------------------------|-------------|
+| **Human** | 0.8 m | 0.6 m | Higher thresholds for human safety |
+| **Obstacle** | 0.6 m | 0.4 m | Standard thresholds with latency compensation |
+
+When any sensor reading falls below the corresponding threshold, the robot enters avoidance mode and executes a turning maneuver to the side with more clearance. The path is considered clear when the relevant sensor exceeds the threshold by a factor of 1.3× (e.g., 1.04m for human front detection).
+
 ### Camera and Detection Calibration
 
 | Parameter | Value | Description |
