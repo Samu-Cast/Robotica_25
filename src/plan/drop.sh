@@ -5,4 +5,4 @@ docker stop plan_module
 docker rm plan_module
 docker rmi plan_image
 
-echo "✅ Plan module dropped"
+echo "Plan module dropped"
