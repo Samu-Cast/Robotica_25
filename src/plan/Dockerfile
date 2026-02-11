@@ -1,4 +1,4 @@
-# Modulo Act – ROS 2 Foxy (deploy fisico su Jetson)
+# Modulo Plan – ROS 2 Foxy (deploy fisico su Jetson)
 FROM ros:foxy-ros-base
 
 USER root
@@ -8,7 +8,7 @@ ENV ROS_DISTRO=foxy
 ENV PYTHONUNBUFFERED=1
 ENV DEBIAN_FRONTEND=noninteractive
 
-WORKDIR /home/ubuntu/act_ws
+WORKDIR /home/ubuntu/plan_ws
 
 # ── Dipendenze di sistema ────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y \
@@ -28,8 +28,8 @@ WORKDIR /home/ubuntu/irobot_ws
 RUN . /opt/ros/foxy/setup.sh && \
     colcon build --symlink-install --packages-select irobot_create_msgs
 
-# ── Dipendenze Python ────────────────────────────────────────────────────────
-WORKDIR /home/ubuntu/act_ws
+# ── Dipendenze Python (py_trees) ─────────────────────────────────────────────
+WORKDIR /home/ubuntu/plan_ws
 COPY requirements.txt .
 RUN pip3 install -r requirements.txt --break-system-packages || \
     pip3 install -r requirements.txt
@@ -39,7 +39,7 @@ RUN echo "source /opt/ros/foxy/setup.bash" >> /home/ubuntu/.bashrc && \
     echo "source /home/ubuntu/irobot_ws/install/setup.bash 2>/dev/null || true" >> /home/ubuntu/.bashrc
 
 # ── Entrypoint ───────────────────────────────────────────────────────────────
-COPY ./entrypoint.sh /entrypoint.sh
+COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # ── Utente non-root ──────────────────────────────────────────────────────────
@@ -47,5 +47,5 @@ USER ubuntu
 
 ENTRYPOINT ["/entrypoint.sh"]
 
-# Default command: avvia action_node
-CMD ["python3", "action_node.py"]
+# Default command: avvia plan_node
+CMD ["python3", "plan_node.py"]
