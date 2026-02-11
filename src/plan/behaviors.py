@@ -1271,6 +1271,6 @@ def build_tree():
     ])
     
     #Retry until mission success
-    root = decorators.Retry("LoopUntilSuccess", child=main, num_failures=-1)
     
-    return root
+    
+    return main
