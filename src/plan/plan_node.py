@@ -312,6 +312,17 @@ class PlanNode(Node):
                     self._human_position_saved = True
                     self.get_logger().info(f"HUMAN POSITION SAVED @ ({human_pos['x']:.2f}, {human_pos['y']:.2f})")
                     
+                    # Add signal for person detection with position
+                    current_signals = self.bb.get("signals") or []
+                    person_signal = {
+                        "type": "PersonFound",
+                        "x": human_pos['x'],
+                        "y": human_pos['y'],
+                        "theta": human_pos['theta']
+                    }
+                    current_signals.append(person_signal)
+                    self.bb.set("signals", current_signals)
+                    
             elif det.get('color') == 'red':
                 #Red color = valve
                 self.bb.set("found", "valve")
