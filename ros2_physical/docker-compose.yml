@@ -1,7 +1,7 @@
 services:
 
-  # ── Sense Module ───────────────────────────────────────────────────────────
-  # Camera + YOLO detection + sensori dal robot fisico iCreate3
+  #Sense Module
+  #Camera + sensori dal robot fisico iCreate3
   sense:
     build:
       context: ../src/sense
@@ -23,8 +23,8 @@ services:
     stdin_open: true
     tty: true
 
-  # ── Plan Module ────────────────────────────────────────────────────────────
-  # Behavior tree + logica decisionale
+  #Plan Module
+  #Behavior tree + logica decisionale
   plan:
     build:
       context: ../src/plan
@@ -42,8 +42,8 @@ services:
     stdin_open: true
     tty: true
 
-  # ── Act Module ─────────────────────────────────────────────────────────────
-  # Invio comandi di velocità al robot fisico iCreate3
+  #Act Module
+  #Invio comandi di velocità al robot fisico iCreate3
   act:
     build:
       context: ../src/act

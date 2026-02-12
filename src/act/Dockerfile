@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y \
 #irobot_create_msgs (build da sorgente per Foxy)
 WORKDIR /home/ubuntu/irobot_ws/src
 RUN git clone -b foxy \
-    https://github.com/iRobot/irobot_create_msgs.git
+    https://github.com/iRobotEducation/irobot_create_msgs.git
 WORKDIR /home/ubuntu/irobot_ws
 RUN . /opt/ros/foxy/setup.sh && \
     colcon build --symlink-install --packages-select irobot_create_msgs
@@ -43,6 +43,9 @@ COPY ./entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 #Utente non-root
+RUN useradd -ms /bin/bash ubuntu && \
+    mkdir -p /home/ubuntu/.ros/log && \
+    chown -R ubuntu:ubuntu /home/ubuntu
 USER ubuntu
 
 ENTRYPOINT ["/entrypoint.sh"]
