@@ -150,6 +150,15 @@ class PlanNode(Node):
             self._startup_timer.cancel()
             self._startup_timer = None
         
+        # === SAVE HOME POSITION HERE (before any movement) ===
+        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        self.bb.set("home_position", {
+            'x': robot_pos['x'],
+            'y': robot_pos['y'],
+            'theta': robot_pos['theta']
+        })
+        self.get_logger().info(f"HOME POSITION SAVED @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f}) BEFORE retreat")
+        
         self._robot_ready = True
         self.get_logger().info('=== Plan Node READY - Starting Behavior Tree ===')
         

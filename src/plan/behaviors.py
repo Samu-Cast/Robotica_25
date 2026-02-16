@@ -504,10 +504,8 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         self.bb.register_key("startup_complete", access=py_trees.common.Access.WRITE)
         self.bb.register_key("startup_complete", access=py_trees.common.Access.READ)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
-        self.bb.register_key("home_position", access=py_trees.common.Access.WRITE)
         self._start_position = None
-        self._home_saved = False
-        self._last_logged_quarter = -1  # Track which quarter we last logged (0, 1, 2, 3)
+        self._last_logged_quarter = -1
     
     def update(self):
         if self.bb.get("startup_complete"):
@@ -516,18 +514,14 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         # Get current robot position
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         
-        # FIRST: Save initial position as home BEFORE moving
-        if not self._home_saved:
-            home_position = {
+        # Save start position for distance tracking only (home already saved by plan_node)
+        if self._start_position is None:
+            self._start_position = {
                 'x': robot_pos['x'],
                 'y': robot_pos['y'],
                 'theta': robot_pos['theta']
             }
-            self.bb.set("home_position", home_position)
-            self._home_saved = True
-            self._start_position = home_position.copy()
-            print(f"[PLAN] HOME SAVED @ ({home_position['x']:.2f}, {home_position['y']:.2f})")
-            print(f"[PLAN] RETREAT START ({self.RETREAT_DISTANCE}m)...")
+            print(f"[PLAN] RETREAT START from ({robot_pos['x']:.2f}, {robot_pos['y']:.2f}) - {self.RETREAT_DISTANCE}m...")
         
         # Calculate distance traveled from start position
         if self._start_position:
