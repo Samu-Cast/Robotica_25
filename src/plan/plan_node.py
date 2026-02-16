@@ -26,7 +26,6 @@ try:
     import rclpy
     from rclpy.node import Node
     from std_msgs.msg import String, Float32, Bool
-    from rosgraph_msgs.msg import Clock
     from sensor_msgs.msg import Range
     from geometry_msgs.msg import Pose2D
     ROS2_AVAILABLE = True
@@ -138,26 +137,13 @@ class PlanNode(Node):
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
         self.bt_status_pub = self.create_publisher(String, '/plan/bt_status', 10)  # BT visualization topic
         
-        #Startup synchronization: wait for robot_description + 20 seconds
+        #Startup: wait 5 seconds then start BT (no /clock needed on physical robot)
         self._robot_ready = False
-        self._startup_timer = None
+        self._startup_timer = self.create_timer(5.0, self._start_behavior_tree)
         
-        #Subscribe to robot_description to know when robot is spawned
-        self.create_subscription(
-            Clock, '/clock',
-            self._clock_cb, 10
-        )
-        
-        self.get_logger().info('Waiting for simulation clock...')
+        self.get_logger().info('Waiting 5 seconds for sensors to stabilize...')
     
-    def _clock_cb(self, msg):
-        """Callback for /clock topic. Starts BT after simulation time > 0."""
-        if not self._robot_ready and self._startup_timer is None:
-            #Check if simulation has started (time > 0)
-            if msg.clock.sec > 0 or msg.clock.nanosec > 0:
-                self.get_logger().info(f'Simulation started (time={msg.clock.sec}s)! Waiting 15s for stabilization...')
-                self._startup_timer = self.create_timer(15.0, self._start_behavior_tree)
-    
+
     def _start_behavior_tree(self):
         """Called after clock detected + 15 seconds delay."""
         if self._startup_timer:
