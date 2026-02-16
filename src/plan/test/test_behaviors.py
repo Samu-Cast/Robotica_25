@@ -25,30 +25,30 @@ from behaviors import (
 class TestHelperFunctions:
     """Test per helper functions"""
     
-    #calculate_best_direction
+    #calculate_best_direction (IR 3-band: 0.20=far, 0.12=medium, 0.05=danger)
     def test_best_dir_all_blocked(self):
-        """PANIC MODE: tutti sensori < 0.2m -> gira su se stesso"""
-        assert calculate_best_direction(0.15, 0.1, 0.18) == 'AVOID_OBSTACLE'
+        """PANIC MODE: tutti sensori a 0.05m (danger) -> gira su se stesso"""
+        assert calculate_best_direction(0.05, 0.05, 0.05) == 'AVOID_OBSTACLE'
     
     def test_best_dir_center_blocked_left_free(self):
-        """Centro bloccato, sinistra libera -> gira a sinistra"""
-        assert calculate_best_direction(2.0, 0.3, 0.5) == 'TURN_LEFT'
+        """Centro bloccato (0.05), sinistra libera (0.20) -> gira a sinistra"""
+        assert calculate_best_direction(0.20, 0.05, 0.12) == 'TURN_LEFT'
     
     def test_best_dir_center_blocked_right_free(self):
-        """Centro bloccato, destra libera -> gira a destra"""
-        assert calculate_best_direction(0.5, 0.3, 2.0) == 'TURN_RIGHT'
+        """Centro bloccato (0.05), destra libera (0.20) -> gira a destra"""
+        assert calculate_best_direction(0.12, 0.05, 0.20) == 'TURN_RIGHT'
     
     def test_best_dir_left_too_close(self):
-        """Troppo vicino a muro sinistro -> allontanati (gira destra)"""
-        assert calculate_best_direction(0.25, 2.0, 2.0) == 'TURN_RIGHT'
+        """Troppo vicino a muro sinistro (0.05) -> allontanati (gira destra)"""
+        assert calculate_best_direction(0.05, 0.20, 0.20) == 'TURN_RIGHT'
     
     def test_best_dir_right_too_close(self):
-        """Troppo vicino a muro destro -> allontanati (gira sinistra)"""
-        assert calculate_best_direction(2.0, 2.0, 0.25) == 'TURN_LEFT'
+        """Troppo vicino a muro destro (0.05) -> allontanati (gira sinistra)"""
+        assert calculate_best_direction(0.20, 0.20, 0.05) == 'TURN_LEFT'
     
     def test_best_dir_all_clear(self):
-        """Tutto libero -> vai dritto"""
-        assert calculate_best_direction(2.0, 2.0, 2.0) == 'MOVE_FORWARD'
+        """Tutto libero (0.20) -> vai dritto"""
+        assert calculate_best_direction(0.20, 0.20, 0.20) == 'MOVE_FORWARD'
     
     #calculate_closest_target
     def test_closest_target_finds(self):
@@ -197,14 +197,14 @@ class TestBehaviors:
         AtTarget: SUCCESS quando robot è al target con colore corretto.
         
         Condizioni di successo:
-        1. Sensore di prossimità < 0.30m (vicino al muro)
+        1. Sensore di prossimità <= 0.08m (PROXIMITY_THRESHOLD)
         2. Colore rilevato == nome target (es. "red" per target rosso)
         """
         target = {'name': 'red', 'x': -6.5, 'y': -3.0, 'theta': 3.14}
         self.bb.set("current_target", target)
         self.bb.set("detected_color", "red") #Colore giusto
         self.bb.set("detection_zone", "center") #Centrato
-        self.bb.set("distance_center", 0.25) #Vicino
+        self.bb.set("distance_center", 0.05) #Danger zone (prossimo al muro)
         b = AtTarget()
         b.setup_with_descendants()
         assert b.update() == Status.SUCCESS
@@ -220,7 +220,7 @@ class TestBehaviors:
         self.bb.set("robot_position", {'x': -3.0, 'y': -4.5, 'theta': -1.57})
         self.bb.set("detected_color", "green")
         self.bb.set("detection_zone", "left") #Colore a sinistra -> gira sinistra
-        self.bb.set("distance_center", 0.8)
+        self.bb.set("distance_center", 0.20) #Far (non ancora al target)
         b = AtTarget()
         b.setup_with_descendants()
         assert b.update() == Status.RUNNING
@@ -240,9 +240,9 @@ class TestBehaviors:
         Sensori bloccati -> calcola direzione di fuga
         """
         self.bb.set("current_target", {'name': 'blue', 'x': 5, 'y': 0, 'theta': 0})
-        self.bb.set("distance_left", 0.2) #Ostacolo a sinistra
-        self.bb.set("distance_center", 0.4) #Ostacolo davanti
-        self.bb.set("distance_right", 2.0) #Destra libera
+        self.bb.set("distance_left", 0.05) #Ostacolo a sinistra (danger)
+        self.bb.set("distance_center", 0.12) #Ostacolo davanti (medium)
+        self.bb.set("distance_right", 0.20) #Destra libera (far)
         b = MoveToTarget()
         b.setup_with_descendants()
         b.update()

@@ -42,25 +42,30 @@ HOME_POSITION_DEFAULT = {
 
 
 #HELPER FUNCTIONS
-def calculate_best_direction(distance_left, distance_center, distance_right, threshold=0.5):
+def calculate_best_direction(distance_left, distance_center, distance_right, threshold=0.12):
     """
     Calculate the optimal movement direction based on 3 distance sensors.
     
+    IR sensor values (from sense_node threshold conversion):
+        0.20m = far (no concern)
+        0.12m = medium (valid detection)
+        0.05m = close (danger)
+    
     Logic:
-    1. Safety: If ALL sensors < 0.2m -> AVOID_OBSTACLE (Spin)
-    2. Frontal Obstacle: If Center < threshold -> Turn to side with MORE space.
+    1. Safety: If ALL sensors <= 0.05m -> AVOID_OBSTACLE (Spin)
+    2. Frontal Obstacle: If Center <= threshold -> Turn to side with MORE space.
     3. Center Clear:
        - Check Side Safety (Wall Following):
-         If side < 0.3m -> Turn AWAY to align.
+         If side <= 0.05m -> Turn AWAY to align.
        - Else -> MOVE_FORWARD.
     """
     # 1. Safety Panic Check (Too close to everything)
-    SAFETY_LIMIT = 0.2
-    if distance_left < SAFETY_LIMIT and distance_center < SAFETY_LIMIT and distance_right < SAFETY_LIMIT:
+    SAFETY_LIMIT = 0.05  # 5cm - danger zone from IR sensors
+    if distance_left <= SAFETY_LIMIT and distance_center <= SAFETY_LIMIT and distance_right <= SAFETY_LIMIT:
         return 'AVOID_OBSTACLE'
     
     # 2. Frontal Obstacle Check (Primary Trigger)
-    if distance_center < threshold:
+    if distance_center <= threshold:
         # Center is blocked - we MUST turn.
         # Compare Left vs Right to find the best escape route.
         if distance_left > distance_right:
@@ -69,7 +74,7 @@ def calculate_best_direction(distance_left, distance_center, distance_right, thr
             return 'TURN_RIGHT' # Right has more space
             
     # 3. Center is Clear - check for Wall Alignment / Side Safety
-    SIDE_SAFETY_THRESHOLD = 0.3 # meters
+    SIDE_SAFETY_THRESHOLD = 0.08  # between danger (0.05) and medium (0.12)
     
     if distance_left < SIDE_SAFETY_THRESHOLD:
         return 'TURN_RIGHT' # Too close/angled to left wall -> Align right
@@ -345,7 +350,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
            - Mark target as visited, proceed to next target
     """
     COLOR_DETECTION_DISTANCE = 1.0  # Distance threshold for color detection (meters)
-    PROXIMITY_THRESHOLD = 0.30  # Distance to consider target reached (meters)
+    PROXIMITY_THRESHOLD = 0.08  # Distance to consider target reached (between 0.05 danger and 0.12 medium)
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -643,8 +648,8 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
         detection_zone = self.bb.get("detection_zone")
         
-        #Thresholds
-        OBSTACLE_DIST = 0.5
+        #Thresholds (adapted for IR sensor 3-band values: 0.20, 0.12, 0.05)
+        OBSTACLE_DIST = 0.12  # medium range from IR sensors
         
         #CHECK FOR CHARGE_COLOR MODE (Ignore obstacles, go straight to colored wall)
         current_action = self.bb.get("plan_action")
@@ -661,13 +666,13 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         found = self.bb.get("found")
         human_detected = (found == "person")
         
-        # Thresholds: Double distance for humans
+        # Thresholds adapted for 3-band IR (0.20m far, 0.12m medium, 0.05m danger)
         if human_detected:
-            FRONT_OBSTACLE_DIST = 0.8  # higher for humans
-            SIDE_OBSTACLE_DIST = 0.6   # higher for humans
+            FRONT_OBSTACLE_DIST = 0.20  # react at far range for humans
+            SIDE_OBSTACLE_DIST = 0.15   # higher for humans
         else:
-            FRONT_OBSTACLE_DIST = 0.6  # increased for latency compensation
-            SIDE_OBSTACLE_DIST = 0.4
+            FRONT_OBSTACLE_DIST = 0.12  # medium range = obstacle detected
+            SIDE_OBSTACLE_DIST = 0.08   # between danger and medium
         
         is_blocked = (d_center < FRONT_OBSTACLE_DIST or 
                       d_left < SIDE_OBSTACLE_DIST or 

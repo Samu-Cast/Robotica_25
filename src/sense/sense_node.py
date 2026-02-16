@@ -61,13 +61,17 @@ class SenseNode(Node):
         'ir_intensity_right': 'front_right',
     }
 
-    # IR Intensity -> Distance conversion (calibrated from physical robot)
-    # Power-law model: distance = IR_A * ir_value^(-IR_B)
-    # Calibrated with: 30cm -> IR≈10, 1.5cm -> IR≈2500
-    IR_A = 1.05            # Calibration coefficient
-    IR_B = 0.54            # Calibration exponent
-    IR_MAX_DISTANCE = 4.0  # meters - returned when IR value ≈ 0 (no object detected)
-    IR_MIN_DISTANCE = 0.015 # meters - minimum valid distance (1.5cm)
+    # IR Intensity -> Distance conversion (threshold-based, calibrated from physical robot)
+    # Thresholds for IR intensity bands:
+    #   0-70    -> far (no concern)   -> 0.20m (20cm)
+    #   70-280  -> valid range        -> 0.12m (12cm)
+    #   >280    -> danger (too close) -> 0.05m (5cm)
+    IR_THRESHOLD_LOW = 70      # Below this = far away
+    IR_THRESHOLD_HIGH = 280    # Above this = dangerously close
+    IR_DIST_FAR = 0.20         # 20 cm - far, no concern
+    IR_DIST_MEDIUM = 0.12      # 12 cm - valid detection range
+    IR_DIST_CLOSE = 0.05       # 5 cm  - danger, too close
+    IR_MAX_DISTANCE = 0.20     # meters - max reported distance
 
     # Minimum bbox area to consider a detection (filters out far detections)
     # ~5000 px² is roughly a detection at 3m distance
@@ -166,24 +170,24 @@ class SenseNode(Node):
         self.get_logger().info('  - /sense/detection_zone (continuous: left/center/right/none)')
     
     def _ir_to_distance(self, ir_value):
-        """Convert IR intensity value to approximate distance in meters.
+        """Convert IR intensity value to distance in meters using threshold bands.
         
-        Power-law model calibrated from physical robot measurements:
-            distance = IR_A * ir_value^(-IR_B)
-        
-        Calibration points:
-            - 30cm (0.30m) -> IR ≈ 10
-            - 1.5cm (0.015m) -> IR ≈ 2500
+        Threshold-based conversion calibrated for iCreate3 IR sensors:
+            IR 0-70   -> 0.20m (20cm) - far, no concern
+            IR 70-280 -> 0.12m (12cm) - valid detection range
+            IR >280   -> 0.05m (5cm)  - danger, too close
         
         Args:
-            ir_value: raw IR intensity (int16, 0 = no object, 2500 = very close)
+            ir_value: raw IR intensity (int16, 0 = no object, higher = closer)
         Returns:
-            distance in meters (clamped to [IR_MIN_DISTANCE, IR_MAX_DISTANCE])
+            distance in meters (0.20, 0.12, or 0.05)
         """
-        if ir_value <= 0:
-            return self.IR_MAX_DISTANCE  # No object detected
-        distance = self.IR_A * (ir_value ** (-self.IR_B))
-        return max(self.IR_MIN_DISTANCE, min(self.IR_MAX_DISTANCE, distance))
+        if ir_value <= self.IR_THRESHOLD_LOW:
+            return self.IR_DIST_FAR       # Far away - no concern
+        elif ir_value <= self.IR_THRESHOLD_HIGH:
+            return self.IR_DIST_MEDIUM    # Valid range
+        else:
+            return self.IR_DIST_CLOSE     # Too close - danger
     
     def _ir_intensity_callback(self, msg: IrIntensityVector):
         """Process IR intensity sensor data from iCreate3
@@ -426,7 +430,7 @@ class SenseNode(Node):
             msg.header.frame_id = f'ir_{sensor_name}'
             msg.radiation_type = Range.INFRARED
             msg.field_of_view = 0.26  # ~15 degrees
-            msg.min_range = self.IR_MIN_DISTANCE
+            msg.min_range = self.IR_DIST_CLOSE
             msg.max_range = self.IR_MAX_DISTANCE
             msg.range = distance if distance < float('inf') else -1.0
             self.proximity_pubs[sensor_name].publish(msg)
