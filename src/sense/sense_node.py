@@ -3,12 +3,12 @@
 Sense Node - Aggregates sensor data and publishes specialized ROS2 topics
 
 Subscribes to:
-    - /ultrasonic_front/scan, /ultrasonic_front_left/scan, /ultrasonic_front_right/scan (LaserScan)
+    - /ir_intensity (IrIntensityVector) - IR proximity sensors from iCreate3
     - /camera_front/image (Image) for color detection and human detection
     - /odom (Odometry) for robot position
 
 Publishes:
-    - /sense/proximity/front, front_left, front_right (Range) - ultrasonic distances
+    - /sense/proximity/front, front_left, front_right (Range) - IR proximity values
     - /sense/odometry (Pose2D) - robot position
     - /sense/detection (String) - JSON with current detection (event-driven)
     - /sense/detection_zone (String) - detection zone (left, center, right)
@@ -30,7 +30,8 @@ os.environ.setdefault("KMP_WARNINGS", "0")
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from sensor_msgs.msg import LaserScan, Image, Range, BatteryState
+from sensor_msgs.msg import Image, Range, BatteryState
+from irobot_create_msgs.msg import IrIntensityVector
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose2D
 from std_msgs.msg import String, Float32, Bool
@@ -50,6 +51,15 @@ class SenseNode(Node):
     Main Sense Node - Publishes specialized ROS2 topics for Plan node
     """
     
+    # Map iCreate3 IR sensor frame_ids to internal sensor names
+    # ir_intensity_side_left  -> front (center-facing on our robot)
+    # ir_intensity_front_left -> front_left
+    # ir_intensity_front_right -> front_right
+    IR_SENSOR_MAP = {
+        'ir_intensity_side_left': 'front',
+        'ir_intensity_front_left': 'front_left',
+        'ir_intensity_front_right': 'front_right',
+    }
 
     # Minimum bbox area to consider a detection (filters out far detections)
     # ~5000 px² is roughly a detection at 3m distance
@@ -77,10 +87,10 @@ class SenseNode(Node):
             self.get_logger().warn('Human detector not available - YOLO model not loaded')
         
         # State variables
-        self.ultrasonic_data = {
-            'front': float('inf'),
-            'front_left': float('inf'),
-            'front_right': float('inf'),
+        self.ir_data = {
+            'front': 0,
+            'front_left': 0,
+            'front_right': 0,
         }
         self.odometry = {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.battery_level = None  # None until first message received
@@ -101,17 +111,10 @@ class SenseNode(Node):
         self.image_height = 480
         
         # === SUBSCRIBERS ===
+        # IR intensity sensors from iCreate3 physical robot
         self.create_subscription(
-            LaserScan, '/ultrasonic_front/scan',
-            lambda msg: self._ultrasonic_callback(msg, 'front'), 10
-        )
-        self.create_subscription(
-            LaserScan, '/ultrasonic_front_left/scan',
-            lambda msg: self._ultrasonic_callback(msg, 'front_left'), 10
-        )
-        self.create_subscription(
-            LaserScan, '/ultrasonic_front_right/scan',
-            lambda msg: self._ultrasonic_callback(msg, 'front_right'), 10
+            IrIntensityVector, '/ir_intensity',
+            self._ir_intensity_callback, 10
         )
         self.create_subscription(Image, '/camera_front/image', self._camera_callback, 10)
         self.create_subscription(Odometry, '/odom', self._odom_callback, 10)
@@ -145,20 +148,24 @@ class SenseNode(Node):
         self.create_timer(0.1, self._publish_periodic)  # 10 Hz
         
         self.get_logger().info('Sense Node ready')
-        self.get_logger().info('  - /sense/proximity/[front|front_left|front_right]')
+        self.get_logger().info('  - /sense/proximity/[front|front_left|front_right] (from IR sensors)')
         self.get_logger().info('  - /sense/odometry')
         self.get_logger().info('  - /sense/battery')
         self.get_logger().info('  - /sense/detection (event-driven)')
         self.get_logger().info('  - /sense/detection_zone (continuous: left/center/right/none)')
     
-    def _ultrasonic_callback(self, msg: LaserScan, sensor_name: str):
-        """Process ultrasonic sensor data"""
-        if msg.ranges:
-            valid_ranges = [r for r in msg.ranges if msg.range_min < r < msg.range_max]
-            if valid_ranges:
-                self.ultrasonic_data[sensor_name] = min(valid_ranges)
-            else:
-                self.ultrasonic_data[sensor_name] = float('inf')
+    def _ir_intensity_callback(self, msg: IrIntensityVector):
+        """Process IR intensity sensor data from iCreate3
+        
+        The IrIntensityVector contains 7 readings.
+        Each reading has header.frame_id (sensor name) and value (int16).
+        Higher value = closer object.
+        """
+        for reading in msg.readings:
+            frame_id = reading.header.frame_id
+            if frame_id in self.IR_SENSOR_MAP:
+                sensor_name = self.IR_SENSOR_MAP[frame_id]
+                self.ir_data[sensor_name] = reading.value
     
     def _odom_callback(self, msg: Odometry):
         """Process odometry data"""
@@ -256,20 +263,20 @@ class SenseNode(Node):
             return 'center'
     
     def _get_proximity_for_zone(self, zone):
-        """Get the ultrasonic distance for a given zone
+        """Get the IR intensity value for a given zone
         
         Args:
             zone: 'left', 'center', or 'right'
             
         Returns:
-            distance in meters from corresponding ultrasonic sensor
+            IR intensity value (int16, higher = closer) from corresponding sensor
         """
         if zone == 'left':
-            return self.ultrasonic_data.get('front_left', float('inf'))
+            return self.ir_data.get('front_left', 0)
         elif zone == 'right':
-            return self.ultrasonic_data.get('front_right', float('inf'))
+            return self.ir_data.get('front_right', 0)
         else:  # center
-            return self.ultrasonic_data.get('front', float('inf'))
+            return self.ir_data.get('front', 0)
     
     def _estimate_distance_from_bbox(self, bbox_area):
         """Estimate distance based on bounding box area (larger = closer)
@@ -375,16 +382,16 @@ class SenseNode(Node):
     def _publish_periodic(self):
         """Publish proximity and odometry at fixed rate"""
         
-        # Publish proximity sensors
-        for sensor_name, distance in self.ultrasonic_data.items():
+        # Publish IR proximity sensors
+        for sensor_name, ir_value in self.ir_data.items():
             msg = Range()
             msg.header.stamp = self.get_clock().now().to_msg()
-            msg.header.frame_id = f'ultrasonic_{sensor_name}'
-            msg.radiation_type = Range.ULTRASOUND
+            msg.header.frame_id = f'ir_{sensor_name}'
+            msg.radiation_type = Range.INFRARED
             msg.field_of_view = 0.26  # ~15 degrees
-            msg.min_range = 0.02
-            msg.max_range = 4.0
-            msg.range = distance if distance < float('inf') else -1.0
+            msg.min_range = 0.0
+            msg.max_range = 4096.0
+            msg.range = float(ir_value)
             self.proximity_pubs[sensor_name].publish(msg)
         
         # Publish odometry
@@ -439,8 +446,8 @@ class SenseNode(Node):
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
         
         # Draw sensor info
-        us_text = f"US: F={self.ultrasonic_data['front']:.2f} FL={self.ultrasonic_data['front_left']:.2f} FR={self.ultrasonic_data['front_right']:.2f}"
-        cv2.putText(debug, us_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        ir_text = f"IR: F={self.ir_data['front']} FL={self.ir_data['front_left']} FR={self.ir_data['front_right']}"
+        cv2.putText(debug, ir_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         pos_text = f"Pos: x={self.odometry['x']:.2f} y={self.odometry['y']:.2f} θ={self.odometry['theta']:.2f}"
         cv2.putText(debug, pos_text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
