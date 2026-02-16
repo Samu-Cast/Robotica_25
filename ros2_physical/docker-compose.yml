@@ -19,11 +19,12 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 2G 
+          memory: 2G
     stdin_open: true
     tty: true
+    command: python3 sense_node.py
 
-  plan: 
+  plan:
     build:
       context: ../src/plan
     container_name: charlie_plan_physical
@@ -39,6 +40,7 @@ services:
       - ../src/plan/:/home/ubuntu/plan_ws/
     stdin_open: true
     tty: true
+    command: python3 plan_node.py
 
   act:
     build:
@@ -56,3 +58,4 @@ services:
       - ../src/act/:/home/ubuntu/act_ws/
     stdin_open: true
     tty: true
+    command: python3 action_node.py
