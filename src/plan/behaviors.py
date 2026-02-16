@@ -46,17 +46,17 @@ def calculate_best_direction(distance_left, distance_center, distance_right, thr
     """
     Calculate the optimal movement direction based on 3 distance sensors.
     
-    IR sensor values (from sense_node threshold conversion):
+    IR sensor values (from sense_node 4-band conversion):
         0.20m = far (no concern)
         0.12m = medium (valid detection)
+        0.08m = medium-close (wall nearby)
         0.05m = close (danger)
     
     Logic:
     1. Safety: If ALL sensors <= 0.05m -> AVOID_OBSTACLE (Spin)
     2. Frontal Obstacle: If Center <= threshold -> Turn to side with MORE space.
     3. Center Clear:
-       - Check Side Safety (Wall Following):
-         If side <= 0.05m -> Turn AWAY to align.
+       - Wall Following: If side <= 0.08m -> Turn AWAY from wall.
        - Else -> MOVE_FORWARD.
     """
     # 1. Safety Panic Check (Too close to everything)
@@ -73,14 +73,14 @@ def calculate_best_direction(distance_left, distance_center, distance_right, thr
         else:
             return 'TURN_RIGHT' # Right has more space
             
-    # 3. Center is Clear - check for Wall Alignment / Side Safety
-    SIDE_SAFETY_THRESHOLD = 0.08  # between danger (0.05) and medium (0.12)
+    # 3. Center is Clear - Wall Following / Side Safety
+    WALL_THRESHOLD = 0.08  # 8cm - medium-close band = wall detected
     
-    if distance_left < SIDE_SAFETY_THRESHOLD:
-        return 'TURN_RIGHT' # Too close/angled to left wall -> Align right
+    if distance_left <= WALL_THRESHOLD:
+        return 'TURN_RIGHT' # Too close to left wall -> Align right
         
-    if distance_right < SIDE_SAFETY_THRESHOLD:
-        return 'TURN_LEFT'  # Too close/angled to right wall -> Align left
+    if distance_right <= WALL_THRESHOLD:
+        return 'TURN_LEFT'  # Too close to right wall -> Align left
         
     # Safe to move forward (follow wall)
     return 'MOVE_FORWARD'
@@ -648,7 +648,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
         detection_zone = self.bb.get("detection_zone")
         
-        #Thresholds (adapted for IR sensor 3-band values: 0.20, 0.12, 0.05)
+        #Thresholds (adapted for IR sensor 4-band values: 0.20, 0.12, 0.08, 0.05)
         OBSTACLE_DIST = 0.12  # medium range from IR sensors
         
         #CHECK FOR CHARGE_COLOR MODE (Ignore obstacles, go straight to colored wall)
@@ -666,13 +666,13 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         found = self.bb.get("found")
         human_detected = (found == "person")
         
-        # Thresholds adapted for 3-band IR (0.20m far, 0.12m medium, 0.05m danger)
+        # Thresholds for 4-band IR (0.20 far, 0.12 medium, 0.08 wall, 0.05 danger)
         if human_detected:
             FRONT_OBSTACLE_DIST = 0.20  # react at far range for humans
-            SIDE_OBSTACLE_DIST = 0.15   # higher for humans
+            SIDE_OBSTACLE_DIST = 0.12   # medium range for humans
         else:
             FRONT_OBSTACLE_DIST = 0.12  # medium range = obstacle detected
-            SIDE_OBSTACLE_DIST = 0.08   # between danger and medium
+            SIDE_OBSTACLE_DIST = 0.08   # wall detected (medium-close band)
         
         is_blocked = (d_center < FRONT_OBSTACLE_DIST or 
                       d_left < SIDE_OBSTACLE_DIST or 
