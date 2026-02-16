@@ -30,10 +30,10 @@ class MockSenseNode:
     def __init__(self):
         self.image_width = 640
         self.image_height = 480
-        self.ir_data = {
-            'front': 0,
-            'front_left': 0,
-            'front_right': 0,
+        self.proximity_data = {
+            'front': float('inf'),
+            'front_left': float('inf'),
+            'front_right': float('inf'),
         }
     
     def _calculate_bbox_area(self, bbox, format='xywh'):
@@ -75,13 +75,13 @@ class MockSenseNode:
             return 'center'
     
     def _get_proximity_for_zone(self, zone):
-        """Get the IR intensity value for a given zone"""
+        """Get the distance in meters for a given zone"""
         if zone == 'left':
-            return self.ir_data.get('front_left', 0)
+            return self.proximity_data.get('front_left', float('inf'))
         elif zone == 'right':
-            return self.ir_data.get('front_right', 0)
+            return self.proximity_data.get('front_right', float('inf'))
         else:
-            return self.ir_data.get('front', 0)
+            return self.proximity_data.get('front', float('inf'))
     
     def _estimate_distance_from_bbox(self, bbox_area):
         """Estimate distance based on bounding box area"""
@@ -219,24 +219,24 @@ class TestSenseNode:
     # ========================================================================
     
     def test_proximity_zone_mapping(self):
-        """Test mappatura zona -> sensore IR"""
+        """Test mappatura zona -> sensore di prossimità"""
         print("\n[TEST] Proximity Zone Mapping")
         
-        # Setup IR data
-        self.node.ir_data = {
-            'front': 500,
-            'front_left': 1000,
-            'front_right': 300,
+        # Setup proximity data (distances in meters)
+        self.node.proximity_data = {
+            'front': 0.5,
+            'front_left': 1.0,
+            'front_right': 0.3,
         }
         
         # Test each zone
-        assert self.node._get_proximity_for_zone('left') == 1000
-        assert self.node._get_proximity_for_zone('center') == 500
-        assert self.node._get_proximity_for_zone('right') == 300
+        assert self.node._get_proximity_for_zone('left') == 1.0
+        assert self.node._get_proximity_for_zone('center') == 0.5
+        assert self.node._get_proximity_for_zone('right') == 0.3
         
-        print("✓ left -> front_left (1000)")
-        print("✓ center -> front (500)")
-        print("✓ right -> front_right (300)")
+        print("✓ left -> front_left (1.0m)")
+        print("✓ center -> front (0.5m)")
+        print("✓ right -> front_right (0.3m)")
     
     # ========================================================================
     # DISTANCE ESTIMATION

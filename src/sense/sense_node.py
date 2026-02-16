@@ -52,14 +52,22 @@ class SenseNode(Node):
     """
     
     # Map iCreate3 IR sensor frame_ids to internal sensor names
-    # ir_intensity_side_left  -> front (center-facing on our robot)
-    # ir_intensity_front_left -> front_left
-    # ir_intensity_front_right -> front_right
+    # ir_intensity_front_center_left  -> front (center-facing on our robot)
+    # ir_intensity_left -> front_left
+    # ir_intensity_right -> front_right
     IR_SENSOR_MAP = {
-        'ir_intensity_side_left': 'front',
-        'ir_intensity_front_left': 'front_left',
-        'ir_intensity_front_right': 'front_right',
+        'ir_intensity_front_center_left': 'front',
+        'ir_intensity_left': 'front_left',
+        'ir_intensity_right': 'front_right',
     }
+
+    # IR Intensity -> Distance conversion (calibrated from physical robot)
+    # Power-law model: distance = IR_A * ir_value^(-IR_B)
+    # Calibrated with: 30cm -> IR≈10, 1.5cm -> IR≈2500
+    IR_A = 1.05            # Calibration coefficient
+    IR_B = 0.54            # Calibration exponent
+    IR_MAX_DISTANCE = 4.0  # meters - returned when IR value ≈ 0 (no object detected)
+    IR_MIN_DISTANCE = 0.015 # meters - minimum valid distance (1.5cm)
 
     # Minimum bbox area to consider a detection (filters out far detections)
     # ~5000 px² is roughly a detection at 3m distance
@@ -86,11 +94,11 @@ class SenseNode(Node):
         else:
             self.get_logger().warn('Human detector not available - YOLO model not loaded')
         
-        # State variables
-        self.ir_data = {
-            'front': 0,
-            'front_left': 0,
-            'front_right': 0,
+        # State variables - distances in meters (converted from IR intensity)
+        self.proximity_data = {
+            'front': float('inf'),
+            'front_left': float('inf'),
+            'front_right': float('inf'),
         }
         self.odometry = {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.battery_level = None  # None until first message received
@@ -111,14 +119,17 @@ class SenseNode(Node):
         self.image_height = 480
         
         # === SUBSCRIBERS ===
+        # QoS for iCreate3 sensor topics (BEST_EFFORT required by the physical robot)
+        from rclpy.qos import qos_profile_sensor_data
+        
         # IR intensity sensors from iCreate3 physical robot
         self.create_subscription(
             IrIntensityVector, '/ir_intensity',
-            self._ir_intensity_callback, 10
+            self._ir_intensity_callback, qos_profile_sensor_data
         )
         self.create_subscription(Image, '/camera_front/image', self._camera_callback, 10)
-        self.create_subscription(Odometry, '/odom', self._odom_callback, 10)
-        self.create_subscription(BatteryState, '/battery_state', self._battery_callback, 10)
+        self.create_subscription(Odometry, '/odom', self._odom_callback, qos_profile_sensor_data)
+        self.create_subscription(BatteryState, '/battery_state', self._battery_callback, qos_profile_sensor_data)
         
         # === PUBLISHERS ===
         # Proximity sensors (Range messages)
@@ -154,18 +165,44 @@ class SenseNode(Node):
         self.get_logger().info('  - /sense/detection (event-driven)')
         self.get_logger().info('  - /sense/detection_zone (continuous: left/center/right/none)')
     
+    def _ir_to_distance(self, ir_value):
+        """Convert IR intensity value to approximate distance in meters.
+        
+        Power-law model calibrated from physical robot measurements:
+            distance = IR_A * ir_value^(-IR_B)
+        
+        Calibration points:
+            - 30cm (0.30m) -> IR ≈ 10
+            - 1.5cm (0.015m) -> IR ≈ 2500
+        
+        Args:
+            ir_value: raw IR intensity (int16, 0 = no object, 2500 = very close)
+        Returns:
+            distance in meters (clamped to [IR_MIN_DISTANCE, IR_MAX_DISTANCE])
+        """
+        if ir_value <= 0:
+            return self.IR_MAX_DISTANCE  # No object detected
+        distance = self.IR_A * (ir_value ** (-self.IR_B))
+        return max(self.IR_MIN_DISTANCE, min(self.IR_MAX_DISTANCE, distance))
+    
     def _ir_intensity_callback(self, msg: IrIntensityVector):
         """Process IR intensity sensor data from iCreate3
         
         The IrIntensityVector contains 7 readings.
         Each reading has header.frame_id (sensor name) and value (int16).
-        Higher value = closer object.
+        Higher value = closer object -> converted to distance in meters.
         """
+        # One-time debug: log all frame_ids on first message
+        if not hasattr(self, '_ir_debug_done'):
+            self._ir_debug_done = True
+            all_sensors = [(r.header.frame_id, r.value) for r in msg.readings]
+            self.get_logger().info(f'IR SENSORS RECEIVED ({len(msg.readings)}): {all_sensors}')
+        
         for reading in msg.readings:
             frame_id = reading.header.frame_id
             if frame_id in self.IR_SENSOR_MAP:
                 sensor_name = self.IR_SENSOR_MAP[frame_id]
-                self.ir_data[sensor_name] = reading.value
+                self.proximity_data[sensor_name] = self._ir_to_distance(reading.value)
     
     def _odom_callback(self, msg: Odometry):
         """Process odometry data"""
@@ -263,20 +300,20 @@ class SenseNode(Node):
             return 'center'
     
     def _get_proximity_for_zone(self, zone):
-        """Get the IR intensity value for a given zone
+        """Get the distance in meters for a given zone
         
         Args:
             zone: 'left', 'center', or 'right'
             
         Returns:
-            IR intensity value (int16, higher = closer) from corresponding sensor
+            distance in meters from corresponding IR sensor
         """
         if zone == 'left':
-            return self.ir_data.get('front_left', 0)
+            return self.proximity_data.get('front_left', float('inf'))
         elif zone == 'right':
-            return self.ir_data.get('front_right', 0)
+            return self.proximity_data.get('front_right', float('inf'))
         else:  # center
-            return self.ir_data.get('front', 0)
+            return self.proximity_data.get('front', float('inf'))
     
     def _estimate_distance_from_bbox(self, bbox_area):
         """Estimate distance based on bounding box area (larger = closer)
@@ -382,16 +419,16 @@ class SenseNode(Node):
     def _publish_periodic(self):
         """Publish proximity and odometry at fixed rate"""
         
-        # Publish IR proximity sensors
-        for sensor_name, ir_value in self.ir_data.items():
+        # Publish proximity as distances in meters (converted from IR intensity)
+        for sensor_name, distance in self.proximity_data.items():
             msg = Range()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = f'ir_{sensor_name}'
             msg.radiation_type = Range.INFRARED
             msg.field_of_view = 0.26  # ~15 degrees
-            msg.min_range = 0.0
-            msg.max_range = 4096.0
-            msg.range = float(ir_value)
+            msg.min_range = self.IR_MIN_DISTANCE
+            msg.max_range = self.IR_MAX_DISTANCE
+            msg.range = distance if distance < float('inf') else -1.0
             self.proximity_pubs[sensor_name].publish(msg)
         
         # Publish odometry
@@ -445,8 +482,8 @@ class SenseNode(Node):
             cv2.putText(debug, f"Person {person['confidence']:.2f}", (x1, y1 - 10),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
         
-        # Draw sensor info
-        ir_text = f"IR: F={self.ir_data['front']} FL={self.ir_data['front_left']} FR={self.ir_data['front_right']}"
+        # Draw sensor info (distances in meters, converted from IR)
+        ir_text = f"IR: F={self.proximity_data['front']:.2f}m FL={self.proximity_data['front_left']:.2f}m FR={self.proximity_data['front_right']:.2f}m"
         cv2.putText(debug, ir_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         pos_text = f"Pos: x={self.odometry['x']:.2f} y={self.odometry['y']:.2f} θ={self.odometry['theta']:.2f}"
