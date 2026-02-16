@@ -1,7 +1,7 @@
+version: '3.8'
+
 services:
 
-  #Sense Module
-  #Camera + sensori dal robot fisico iCreate3
   sense:
     build:
       context: ../src/sense
@@ -19,13 +19,11 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 4G
+          memory: 2G 
     stdin_open: true
     tty: true
 
-  #Plan Module
-  #Behavior tree + logica decisionale
-  plan:
+  plan: 
     build:
       context: ../src/plan
     container_name: charlie_plan_physical
@@ -42,8 +40,6 @@ services:
     stdin_open: true
     tty: true
 
-  #Act Module
-  #Invio comandi di velocità al robot fisico iCreate3
   act:
     build:
       context: ../src/act
