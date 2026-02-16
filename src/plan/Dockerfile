@@ -35,18 +35,12 @@ RUN pip3 install -r requirements.txt --break-system-packages || \
     pip3 install -r requirements.txt
 
 #Configurazione shell
-RUN echo "source /opt/ros/foxy/setup.bash" >> /home/ubuntu/.bashrc && \
-    echo "source /home/ubuntu/irobot_ws/install/setup.bash 2>/dev/null || true" >> /home/ubuntu/.bashrc
+RUN echo "source /opt/ros/foxy/setup.bash" >> ~/.bashrc && \
+    echo "source /home/ubuntu/irobot_ws/install/setup.bash 2>/dev/null || true" >> ~/.bashrc
 
 #Entrypoint
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-
-#Utente non-root
-RUN useradd -ms /bin/bash ubuntu && \
-    mkdir -p /home/ubuntu/.ros/log && \
-    chown -R ubuntu:ubuntu /home/ubuntu
-USER ubuntu
 
 ENTRYPOINT ["/entrypoint.sh"]
 
