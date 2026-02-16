@@ -145,7 +145,7 @@ class PlanNode(Node):
     
 
     def _start_behavior_tree(self):
-        """Called after clock detected + 15 seconds delay."""
+        """Called after 5-second startup delay on physical robot."""
         if self._startup_timer:
             self._startup_timer.cancel()
             self._startup_timer = None
