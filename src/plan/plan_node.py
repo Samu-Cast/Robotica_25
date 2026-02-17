@@ -43,7 +43,7 @@ from behaviors import build_tree
 # ============================================================================
 # BT VISUALIZATION CONFIG
 # ============================================================================
-BT_DISPLAY = True           # Set to False to disable BT visualization
+BT_DISPLAY = False           # Set to False to disable BT visualization
 BT_DISPLAY_INTERVAL = 50    # Print tree every N ticks (50 = every 5 seconds at 10Hz)
 BT_DISPLAY_ON_CHANGE = True # Also print when state changes significantly
 
@@ -141,7 +141,7 @@ class PlanNode(Node):
         
         #Startup: wait 5 seconds then start BT (no /clock needed on physical robot)
         self._robot_ready = False
-        self._startup_timer = self.create_timer(5.0, self._start_behavior_tree)
+        self._startup_timer = self.create_timer(30.0, self._start_behavior_tree)
         
         self.get_logger().info('Waiting 5 seconds for sensors to stabilize...')
     
