@@ -27,7 +27,8 @@ try:
     from rclpy.node import Node
     from std_msgs.msg import String, Float32, Bool
     from sensor_msgs.msg import Range
-    from geometry_msgs.msg import Pose2D
+    from geometry_msgs.msg import Pose2D, Pose
+    from irobot_create_msgs.srv import ResetPose
     ROS2_AVAILABLE = True
 except ImportError:
     ROS2_AVAILABLE = False
@@ -151,20 +152,41 @@ class PlanNode(Node):
             self._startup_timer.cancel()
             self._startup_timer = None
         
-        # === SAVE HOME POSITION HERE (before any movement) ===
+        # === RESET iCreate3 ODOMETRY TO (0,0,0) ===
+        self._reset_robot_pose()
+        
+        # === SAVE HOME POSITION (after reset, so it's 0,0,0) ===
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.bb.set("home_position", {
             'x': robot_pos['x'],
             'y': robot_pos['y'],
             'theta': robot_pos['theta']
         })
-        self.get_logger().info(f"HOME POSITION SAVED @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f}) BEFORE retreat")
+        self.get_logger().info(f"HOME POSITION SAVED @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
         
         self._robot_ready = True
         self.get_logger().info('=== Plan Node READY - Starting Behavior Tree ===')
         
         #Start the main BT tick timer (10 Hz)
         self.create_timer(0.1, self._tick)
+    
+    def _reset_robot_pose(self):
+        """Call iCreate3 reset_pose service to zero odometry."""
+        try:
+            client = self.create_client(ResetPose, '/reset_pose')
+            if client.wait_for_service(timeout_sec=3.0):
+                request = ResetPose.Request()
+                request.pose = Pose()
+                future = client.call_async(request)
+                rclpy.spin_until_future_complete(self, future, timeout_sec=3.0)
+                if future.result() is not None:
+                    self.get_logger().info('ODOMETRY RESET to (0, 0, 0) via /reset_pose')
+                else:
+                    self.get_logger().warn('reset_pose call failed, continuing anyway')
+            else:
+                self.get_logger().warn('/reset_pose service not available, continuing without reset')
+        except Exception as e:
+            self.get_logger().warn(f'reset_pose error: {e}, continuing anyway')
     
     def _init_blackboard(self):
         """Initialize blackboard with default values."""
