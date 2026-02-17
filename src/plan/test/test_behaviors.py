@@ -115,7 +115,7 @@ class TestBehaviors:
                 'detected_color', 'distance_left', 'distance_center', 'distance_right',
                 'robot_position', 'home_position', 'odom_correction', 'startup_complete',
                 'detection_zone', 'detection_distance', 'detection_confidence',
-                'color_area', 'human_position', 'targets']
+                'color_area', 'human_position', 'targets', 'origin_offset']
         for k in keys:
             self.bb.register_key(k, access=py_trees.common.Access.WRITE)
         self._init_defaults()
@@ -131,6 +131,7 @@ class TestBehaviors:
         self.bb.set("visited_targets", [])
         self.bb.set("home_position", {'x': 0, 'y': 0, 'theta': 0})
         self.bb.set("odom_correction", {'dx': 0, 'dy': 0, 'dtheta': 0})
+        self.bb.set("origin_offset", {'x': 0, 'y': 0, 'theta': 0})
         self.bb.set("startup_complete", True) #Salta retreat iniziale
         self.bb.set("battery", 100.0)
         self.bb.set("signals", [])
@@ -340,17 +341,16 @@ class TestBehaviors:
     
     def test_initial_retreat_saves_home(self):
         """
-        InitialRetreat: salva posizione iniziale come 'home'.
-        
-        Usato per tornare al punto di partenza a fine missione
+        InitialRetreat: fase RETREAT poi ROTATE poi RESET_ORIGIN.
+        Verifica che la fase 1 manda MOVE_BACKWARD.
         """
         self.bb.set("startup_complete", False)
         self.bb.set("robot_position", {'x': 1.0, 'y': 2.0, 'theta': 0.5})
         b = InitialRetreat()
         b.setup_with_descendants()
-        b.update()
-        home = self.bb.get("home_position")
-        assert home['x'] == 1.0 and home['y'] == 2.0
+        result = b.update()
+        assert result == Status.RUNNING
+        assert self.bb.get("plan_action") == "MOVE_BACKWARD"
     
     
     def test_go_to_human_no_position(self):
