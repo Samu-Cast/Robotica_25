@@ -490,12 +490,15 @@ class AtTarget(py_trees.behaviour.Behaviour):
 
 class InitialRetreat(py_trees.behaviour.Behaviour):
     """
-    Step 1: Move backward from the platform at startup.
-    Saves initial spawn position before retreating.
-    Retreats approximately 1 meter using odometry.
-    Runs only once until completion.
+    Startup sequence with 3 phases:
+    1. RETREAT: Move backward 0.5m to get away from base station
+    2. ROTATE: Turn left 180° to face the room
+    3. RESET_ORIGIN: Set current position as (0,0,0) origin
+    
+    Home/base station position is saved by plan_node BEFORE this runs.
     """
     RETREAT_DISTANCE = 0.5  # meters to retreat
+    ROTATE_ANGLE = math.pi  # 180 degrees
     
     def __init__(self):
         super().__init__(name="InitialRetreat")
@@ -504,51 +507,90 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         self.bb.register_key("startup_complete", access=py_trees.common.Access.WRITE)
         self.bb.register_key("startup_complete", access=py_trees.common.Access.READ)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("origin_offset", access=py_trees.common.Access.WRITE)
+        
+        self._phase = "RETREAT"  # RETREAT -> ROTATE -> RESET_ORIGIN
         self._start_position = None
-        self._last_logged_quarter = -1
+        self._rotate_start_theta = None
+        self._total_rotated = 0.0
+        self._last_theta = None
     
     def update(self):
         if self.bb.get("startup_complete"):
             return Status.SUCCESS
         
-        # Get current robot position
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         
-        # Save start position for distance tracking only (home already saved by plan_node)
-        if self._start_position is None:
-            self._start_position = {
+        # ===== PHASE 1: RETREAT =====
+        if self._phase == "RETREAT":
+            if self._start_position is None:
+                self._start_position = robot_pos.copy()
+                print(f"[STARTUP] Phase 1: RETREAT ({self.RETREAT_DISTANCE}m backward)...")
+            
+            dx = robot_pos['x'] - self._start_position['x']
+            dy = robot_pos['y'] - self._start_position['y']
+            distance = math.sqrt(dx**2 + dy**2)
+            
+            if distance < self.RETREAT_DISTANCE:
+                self.bb.set("plan_action", "MOVE_BACKWARD")
+                return Status.RUNNING
+            else:
+                print(f"[STARTUP] Phase 1 DONE: retreated {distance:.2f}m")
+                self._phase = "ROTATE"
+                self._rotate_start_theta = robot_pos['theta']
+                self._last_theta = robot_pos['theta']
+                self._total_rotated = 0.0
+                self.bb.set("plan_action", "STOP")
+                return Status.RUNNING
+        
+        # ===== PHASE 2: ROTATE 180° =====
+        if self._phase == "ROTATE":
+            if self._rotate_start_theta is None:
+                self._rotate_start_theta = robot_pos['theta']
+                self._last_theta = robot_pos['theta']
+                print(f"[STARTUP] Phase 2: ROTATE 180°...")
+            
+            # Track incremental rotation (handles wrap-around)
+            current_theta = robot_pos['theta']
+            delta = current_theta - self._last_theta
+            
+            # Normalize delta to [-pi, pi] for wrap-around
+            while delta > math.pi:
+                delta -= 2 * math.pi
+            while delta < -math.pi:
+                delta += 2 * math.pi
+            
+            self._total_rotated += abs(delta)
+            self._last_theta = current_theta
+            
+            if self._total_rotated < self.ROTATE_ANGLE:
+                self.bb.set("plan_action", "TURN_LEFT")
+                return Status.RUNNING
+            else:
+                print(f"[STARTUP] Phase 2 DONE: rotated {math.degrees(self._total_rotated):.0f}°")
+                self._phase = "RESET_ORIGIN"
+                self.bb.set("plan_action", "STOP")
+                return Status.RUNNING
+        
+        # ===== PHASE 3: RESET ORIGIN =====
+        if self._phase == "RESET_ORIGIN":
+            # Current robot_position already has the old offset applied.
+            # We need to set origin_offset = current raw position
+            # so that corrected position = raw - offset = (0, 0, 0)
+            # Since current offset is (0,0,0) at startup, robot_position IS the raw position
+            origin = {
                 'x': robot_pos['x'],
                 'y': robot_pos['y'],
                 'theta': robot_pos['theta']
             }
-            print(f"[PLAN] RETREAT START from ({robot_pos['x']:.2f}, {robot_pos['y']:.2f}) - {self.RETREAT_DISTANCE}m...")
+            self.bb.set("origin_offset", origin)
+            self.bb.set("startup_complete", True)
+            self.bb.set("plan_action", "STOP")
+            print(f"[STARTUP] Phase 3 DONE: ORIGIN RESET")
+            print(f"[STARTUP] Raw position was ({origin['x']:.2f}, {origin['y']:.2f}, {math.degrees(origin['theta']):.0f}°)")
+            print(f"[STARTUP] New origin = (0.00, 0.00, 0°) - Navigation started!")
+            return Status.SUCCESS
         
-        # Calculate distance traveled from start position
-        if self._start_position:
-            dx = robot_pos['x'] - self._start_position['x']
-            dy = robot_pos['y'] - self._start_position['y']
-            distance_traveled = math.sqrt(dx**2 + dy**2)
-            
-            if distance_traveled < self.RETREAT_DISTANCE:
-                self.bb.set("plan_action", "MOVE_BACKWARD")
-                
-                # Log at 25%, 50%, 75% progress (4 messages total including start and end)
-                progress = distance_traveled / self.RETREAT_DISTANCE
-                current_quarter = int(progress * 4)  # 0, 1, 2, 3
-                if current_quarter > self._last_logged_quarter and current_quarter < 4:
-                    pct = current_quarter * 25
-                    print(f"[PLAN] RETREAT: {pct}% ({distance_traveled:.2f}m)")
-                    self._last_logged_quarter = current_quarter
-                
-                return Status.RUNNING
-            else:
-                self.bb.set("plan_action", "STOP")
-                self.bb.set("startup_complete", True)
-                print(f"[PLAN] RETREAT COMPLETE ({distance_traveled:.2f}m) - Navigation started")
-                return Status.SUCCESS
-        
-        # Fallback: keep moving backward if start position not set
-        self.bb.set("plan_action", "MOVE_BACKWARD")
         return Status.RUNNING
 
 

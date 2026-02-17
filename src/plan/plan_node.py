@@ -99,7 +99,8 @@ class PlanNode(Node):
             'detected_color', 'color_area', 'odom_correction', 'detection_zone',
             'detection_distance', 'detection_confidence',
             'distance_left', 'distance_center', 'distance_right',
-            'robot_position', 'startup_complete', 'home_position', 'human_position'
+            'robot_position', 'startup_complete', 'home_position', 'human_position',
+            'origin_offset'
         ]
         
         # Track if human position already saved (only save first detection)
@@ -196,6 +197,7 @@ class PlanNode(Node):
         self.bb.set("distance_center", 999.0)
         self.bb.set("distance_right", 999.0)
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
+        self.bb.set("origin_offset", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
         self.bb.set("startup_complete", False)
     
     def _proximity_cb(self, msg, sensor):
@@ -218,14 +220,13 @@ class PlanNode(Node):
     def _odom_cb(self, msg):
         """
             Callback for odometry (Pose2D message).
-            
-            Args:
-                msg: Pose2D message with x, y, theta
+            Applies origin_offset so that (0,0,0) = position after startup.
         """
+        offset = self.bb.get("origin_offset") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.bb.set("robot_position", {
-            'x': msg.x,
-            'y': msg.y,
-            'theta': msg.theta
+            'x': msg.x - offset['x'],
+            'y': msg.y - offset['y'],
+            'theta': msg.theta - offset['theta']
         })
     
     def _battery_cb(self, msg):
