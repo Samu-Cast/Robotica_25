@@ -17,17 +17,14 @@ from cv_bridge import CvBridge
 
 
 def get_jetson_gstreamer_source(width=640, height=480, fps=30):
-    """Pipeline GStreamer per camera CSI su Jetson (es. IMX219).
+    """Pipeline GStreamer V4L2 per camera su Jetson via /dev/video0.
 
-    Converte il flusso NV12 dalla camera in BGR per OpenCV tramite
-    nvarguscamerasrc -> nvvidconv -> videoconvert -> appsink.
+    Usa v4l2src invece di nvarguscamerasrc, così funziona dentro Docker
+    senza bisogno di runtime nvidia o plugin L4T.
     """
     return (
-        f"nvarguscamerasrc ! "
-        f"video/x-raw(memory:NVMM), width={width}, height={height}, "
-        f"format=NV12, framerate={fps}/1 ! "
-        f"nvvidconv flip-method=0 ! "
-        f"video/x-raw, width={width}, height={height}, format=BGRx ! "
+        f"v4l2src device=/dev/video0 ! "
+        f"video/x-raw, width={width}, height={height}, framerate={fps}/1 ! "
         f"videoconvert ! "
         f"video/x-raw, format=BGR ! appsink"
     )

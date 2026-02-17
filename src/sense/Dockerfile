@@ -20,14 +20,11 @@ RUN apt-get update && apt-get install -y \
     #Librerie di sistema per OpenCV
     libglib2.0-0 \
     libgl1-mesa-glx \
-	
-    #dipendenze per la fotocamera
+    #dipendenze GStreamer per V4L2 camera
     libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev \
-    gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-good \
-    gstreamer1.0-python3-plugin \
-
+    v4l-utils \
     #CycloneDDS per compatibilità iCreate3
     ros-foxy-rmw-cyclonedds-cpp \
     #Utilità

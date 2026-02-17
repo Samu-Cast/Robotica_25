@@ -9,15 +9,13 @@ services:
     privileged: true
     network_mode: host
     restart: unless-stopped
-    devices: 
+    devices:
       - "/dev/video0:/dev/video0"
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
       - PYTHONUNBUFFERED=1
     volumes:
-      - /tmp/argus_socket:/tmp/argus_socket
-      - /tmp/.X11-unix:/tmp/.X11-unix
       - ../src/sense/:/home/ubuntu/sense_ws/
       - ../models/:/home/ubuntu/models/
     deploy:
