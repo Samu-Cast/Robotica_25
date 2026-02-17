@@ -572,7 +572,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         - Only change direction if error is large (> threshold).
         - Maintain current direction otherwise (Hysteresis).
     """
-    SEARCH_DISTANCE =  0.5 # Start visual search when within this distance (meters)
+    SEARCH_DISTANCE =  0.12 # Start visual search when within this distance (meters)
     
     def __init__(self):
         super().__init__(name="MoveToTarget")
