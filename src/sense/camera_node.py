@@ -13,7 +13,11 @@ import cv2
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
+
+try:
+    from .image_utils import cv2_to_imgmsg
+except ImportError:
+    from image_utils import cv2_to_imgmsg
 
 
 class CameraNode(Node):
@@ -23,7 +27,6 @@ class CameraNode(Node):
         super().__init__('camera_node')
         self.get_logger().info('=== Camera Node Starting ===')
 
-        self.bridge = CvBridge()
         self.pub = self.create_publisher(Image, '/camera_front/image', 10)
 
         # Prova ad aprire la camera: prima V4L2 diretto, poi GStreamer come fallback
@@ -84,7 +87,7 @@ class CameraNode(Node):
         """Cattura un frame dalla camera e lo pubblica sul topic."""
         ret, frame = self.cap.read()
         if ret:
-            msg = self.bridge.cv2_to_imgmsg(frame, encoding='bgr8')
+            msg = cv2_to_imgmsg(frame, encoding='bgr8')
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = 'camera_front'
             self.pub.publish(msg)

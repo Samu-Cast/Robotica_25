@@ -11,13 +11,16 @@ import cv2
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from cv_bridge import CvBridge
+try:
+    from image_utils import imgmsg_to_cv2
+except ImportError:
+    from .image_utils import imgmsg_to_cv2
 
 
 class FrameSaver(Node):
     def __init__(self):
         super().__init__('frame_saver')
-        self.bridge = CvBridge()
+
         self.last_raw = None
         self.last_debug = None
 
@@ -37,14 +40,14 @@ class FrameSaver(Node):
     def save_frames(self):
         ts = time.strftime('%H:%M:%S')
         if self.last_raw is not None:
-            frame = self.bridge.imgmsg_to_cv2(self.last_raw, desired_encoding='bgr8')
+            frame = imgmsg_to_cv2(self.last_raw, desired_encoding='bgr8')
             cv2.imwrite('/home/ubuntu/sense_ws/frame_raw.jpg', frame)
             self.get_logger().info(f'[{ts}] RAW salvato ({frame.shape})')
         else:
             self.get_logger().warn(f'[{ts}] Nessun frame RAW ricevuto')
 
         if self.last_debug is not None:
-            frame = self.bridge.imgmsg_to_cv2(self.last_debug, desired_encoding='bgr8')
+            frame = imgmsg_to_cv2(self.last_debug, desired_encoding='bgr8')
             cv2.imwrite('/home/ubuntu/sense_ws/frame_debug.jpg', frame)
             self.get_logger().info(f'[{ts}] DEBUG salvato ({frame.shape})')
         else:

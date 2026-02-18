@@ -35,7 +35,11 @@ from irobot_create_msgs.msg import IrIntensityVector
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Pose2D
 from std_msgs.msg import String, Float32, Bool
-from cv_bridge import CvBridge
+
+try:
+    from .image_utils import imgmsg_to_cv2, cv2_to_imgmsg
+except ImportError:
+    from image_utils import imgmsg_to_cv2, cv2_to_imgmsg
 
 # Import detection modules
 try:
@@ -88,8 +92,7 @@ class SenseNode(Node):
         super().__init__('sense_node')
         self.get_logger().info('=== Sense Node Starting ===')
         
-        # CV Bridge for image conversion
-        self.bridge = CvBridge()
+
         
         # Initialize detectors
         self.color_detector = ColorDetector()
@@ -234,7 +237,7 @@ class SenseNode(Node):
         """Process camera image for color and human detection"""
         try:
             self.frame_count += 1
-            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            frame = imgmsg_to_cv2(msg, desired_encoding='bgr8')
             
             # Update image dimensions
             self.image_height, self.image_width = frame.shape[:2]
@@ -254,7 +257,7 @@ class SenseNode(Node):
             if self.debug_image_pub.get_subscription_count() > 0:
                 debug_frame = self._draw_debug(frame)
                 self.debug_image_pub.publish(
-                    self.bridge.cv2_to_imgmsg(debug_frame, encoding='bgr8')
+                    cv2_to_imgmsg(debug_frame, encoding='bgr8')
                 )
                 
         except Exception as e:

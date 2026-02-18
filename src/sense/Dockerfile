@@ -14,9 +14,9 @@ WORKDIR /home/ubuntu/sense_ws
 RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-colcon-common-extensions \
-    #Vision / OpenCV bridge
-    ros-foxy-cv-bridge \
-    ros-foxy-vision-opencv \
+    python3-numpy \
+    #OpenCV di sistema (senza cv_bridge - usiamo image_utils.py)
+    python3-opencv \
     #Librerie di sistema per OpenCV
     libglib2.0-0 \
     libgl1-mesa-glx \
@@ -40,12 +40,12 @@ WORKDIR /home/ubuntu/irobot_ws
 RUN . /opt/ros/foxy/setup.sh && \
     colcon build --symlink-install --packages-select irobot_create_msgs
 
-#Dipendenze Python (YOLO, NumPy)
+#Dipendenze Python (YOLO per human detection)
 WORKDIR /home/ubuntu/sense_ws
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --default-timeout=300 --retries 10 \
     -r requirements.txt && \
-    pip3 uninstall -y opencv-python-headless opencv-python 2>/dev/null; true
+    pip3 uninstall -y opencv-python-headless opencv-python opencv-contrib-python 2>/dev/null; true
 
 #Configurazione shell
 RUN echo "source /opt/ros/foxy/setup.bash" >> ~/.bashrc && \
