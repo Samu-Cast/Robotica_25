@@ -154,14 +154,14 @@ class PlanNode(Node):
         
         # === RESET iCreate3 ODOMETRY TO (0,0,0) ===
         self.get_logger().info('=== Plan Node READY - Prima del reset odometria ===')
-	robot_pos = self.bb.get("robot_position")
-	self.get_logger().info(f"POSIZIONE PRIMA DEL RESET ODOMETRIA @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
+        robot_pos = self.bb.get("robot_position")
+        self.get_logger().info(f"POSIZIONE PRIMA DEL RESET ODOMETRIA @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
 
         self._reset_robot_pose()
 
         self.get_logger().info('=== Plan Node READY - Dopo del reset odometria ===')
-	robot_pos = self.bb.get("robot_position")
-	self.get_logger().info(f"POSIZIONE DOPO IL RESET ODOMETRIA @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
+        robot_pos = self.bb.get("robot_position")
+        self.get_logger().info(f"POSIZIONE DOPO IL RESET ODOMETRIA @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
 
         # === SAVE HOME POSITION (after reset, so it's 0,0,0) ===
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
@@ -179,18 +179,29 @@ class PlanNode(Node):
         self.create_timer(0.1, self._tick)
     
     def _reset_robot_pose(self):
-        """Call iCreate3 reset_pose service to zero odometry (non-blocking)."""
+        """Call iCreate3 reset_pose service to zero odometry (blocking)."""
         try:
             client = self.create_client(ResetPose, '/reset_pose')
-            if client.service_is_ready():
-                request = ResetPose.Request()
-                request.pose = Pose()
-                future = client.call_async(request)
-                future.add_done_callback(
-                    lambda f: self.get_logger().info('ODOMETRY RESET to (0,0,0) via /reset_pose')
-                )
+            
+            # Wait up to 10 seconds for the service to be discovered
+            self.get_logger().info('Waiting for /reset_pose service...')
+            if not client.wait_for_service(timeout_sec=10.0):
+                self.get_logger().warn('/reset_pose service not available after 10s, continuing without reset')
+                return
+            
+            self.get_logger().info('/reset_pose service found, sending reset request...')
+            request = ResetPose.Request()
+            request.pose = Pose()
+            future = client.call_async(request)
+            
+            # Block until the service responds (timeout 5s)
+            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
+            
+            if future.done() and future.result() is not None:
+                self.get_logger().info('ODOMETRY RESET to (0,0,0) via /reset_pose - SUCCESS')
             else:
-                self.get_logger().warn('/reset_pose service not available, continuing without reset')
+                self.get_logger().warn('reset_pose call timed out or failed')
+                
         except Exception as e:
             self.get_logger().warn(f'reset_pose error: {e}, continuing anyway')
     
