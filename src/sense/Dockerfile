@@ -44,8 +44,6 @@ RUN . /opt/ros/foxy/setup.sh && \
 WORKDIR /home/ubuntu/sense_ws
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --default-timeout=300 --retries 10 \
-    -r requirements.txt --break-system-packages || \
-    pip3 install --no-cache-dir --default-timeout=300 --retries 10 \
     -r requirements.txt
 
 #Configurazione shell

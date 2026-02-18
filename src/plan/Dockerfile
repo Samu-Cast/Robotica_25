@@ -31,8 +31,7 @@ RUN . /opt/ros/foxy/setup.sh && \
 #Dipendenze Python (py_trees)
 WORKDIR /home/ubuntu/plan_ws
 COPY requirements.txt .
-RUN pip3 install -r requirements.txt --break-system-packages || \
-    pip3 install -r requirements.txt
+RUN pip3 install -r requirements.txt
 
 #Configurazione shell
 RUN echo "source /opt/ros/foxy/setup.bash" >> ~/.bashrc && \
