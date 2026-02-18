@@ -20,55 +20,31 @@ import os
 import time
 import sys
 
-
 def open_camera():
-    """Prova ad aprire la camera con diversi metodi."""
-
-    # 1) V4L2 diretto
-    print('[camera_host] Tentativo 1: V4L2 diretto...')
-    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
-    if cap.isOpened():
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        print('[camera_host] Camera aperta via V4L2')
-        return cap
-
-    # 2) Auto-backend
-    print('[camera_host] Tentativo 2: auto-backend...')
-    cap = cv2.VideoCapture(0)
-    if cap.isOpened():
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-        print('[camera_host] Camera aperta via auto-backend')
-        return cap
-
-    # 3) GStreamer (nvarguscamerasrc per camera CSI Jetson)
+    """Ottimizzato per Jetson CSI Camera."""
+    
+    # La pipeline GStreamer corretta per Jetson
+    # Nota: 'flip-method=2' ruota di 180 gradi se serve, altrimenti usa 0
     pipeline = (
         "nvarguscamerasrc ! "
-        "video/x-raw(memory:NVMM), width=640, height=480, framerate=15/1 ! "
-        "nvvidconv ! video/x-raw, format=BGRx ! "
-        "videoconvert ! video/x-raw, format=BGR ! appsink"
+        "video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! "
+        "nvvidconv flip-method=0 ! "
+        "video/x-raw, width=640, height=480, format=BGRx ! "
+        "videoconvert ! "
+        "video/x-raw, format=BGR ! appsink drop=True"
     )
-    print(f'[camera_host] Tentativo 3: GStreamer nvarguscamerasrc...')
+
+    print(f'[camera_host] Apertura camera via GStreamer (nvarguscamerasrc)...')
     cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+    
     if cap.isOpened():
-        print('[camera_host] Camera aperta via GStreamer nvarguscamerasrc')
+        print('[camera_host] Camera aperta con successo!')
         return cap
 
-    # 4) GStreamer v4l2src
-    pipeline = (
-        "v4l2src device=/dev/video0 ! "
-        "video/x-raw, width=640, height=480 ! "
-        "videoconvert ! video/x-raw, format=BGR ! appsink"
-    )
-    print(f'[camera_host] Tentativo 4: GStreamer v4l2src...')
-    cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-    if cap.isOpened():
-        print('[camera_host] Camera aperta via GStreamer v4l2src')
-        return cap
-
-    return None
-
+    # Fallback se GStreamer fallisce
+    print('[camera_host] GStreamer fallito, provo V4L2...')
+    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+    return cap if cap.isOpened() else None
 
 def main():
     # Percorso di output: nella stessa cartella dello script (volume condiviso)

@@ -153,8 +153,16 @@ class PlanNode(Node):
             self._startup_timer = None
         
         # === RESET iCreate3 ODOMETRY TO (0,0,0) ===
+        self.get_logger().info('=== Plan Node READY - Prima del reset odometria ===')
+	robot_pos = self.bb.get("robot_position")
+	self.get_logger().info(f"POSIZIONE PRIMA DEL RESET ODOMETRIA @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
+
         self._reset_robot_pose()
-        
+
+        self.get_logger().info('=== Plan Node READY - Dopo del reset odometria ===')
+	robot_pos = self.bb.get("robot_position")
+	self.get_logger().info(f"POSIZIONE DOPO IL RESET ODOMETRIA @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
+
         # === SAVE HOME POSITION (after reset, so it's 0,0,0) ===
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.bb.set("home_position", {

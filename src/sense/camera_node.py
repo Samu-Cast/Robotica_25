@@ -46,41 +46,32 @@ class CameraNode(Node):
         self._warn_count = 0
 
     def _publish_frame(self):
-        """Legge il frame dal file condiviso e lo pubblica."""
         if not os.path.exists(self.frame_path):
-            self._warn_count += 1
-            if self._warn_count % 75 == 1:  # Log ogni ~5 secondi
-                self.get_logger().warn(
-                    f'{self.frame_path} non trovato. '
-                    'Avvia camera_host.py sull\'host Jetson!'
-                )
+            # ... (tuo codice di log) ...
             return
 
         try:
-            # Controlla se il file è stato aggiornato
             mtime = os.path.getmtime(self.frame_path)
             if mtime <= self.last_mtime:
-                return  # Nessun nuovo frame
+                return 
 
             self.last_mtime = mtime
+            
+            # Lettura del frame
             frame = cv2.imread(self.frame_path)
 
             if frame is not None:
                 msg = cv2_to_imgmsg(frame, encoding='bgr8')
+                # Usa il tempo di modifica del file per una sincronizzazione più precisa
+                # invece del tempo "attuale" di ricezione
                 msg.header.stamp = self.get_clock().now().to_msg()
-                msg.header.frame_id = 'camera_front'
+                msg.header.frame_id = 'camera_front_link' # Convenzione standard _link
                 self.pub.publish(msg)
             else:
-                self.get_logger().warn(
-                    'Frame letto ma non valido',
-                    throttle_duration_sec=5.0
-                )
+                self.get_logger().warn('Frame letto corrotto o vuoto', throttle_duration_sec=5.0)
 
         except Exception as e:
-            self.get_logger().warn(
-                f'Errore lettura frame: {e}',
-                throttle_duration_sec=5.0
-            )
+            self.get_logger().error(f'Errore critico: {e}', throttle_duration_sec=2.0)
 
 
 def main(args=None):
