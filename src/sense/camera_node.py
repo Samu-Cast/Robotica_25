@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Camera Node - Cattura frame dalla camera e li pubblica su ROS2
+Camera Node - Legge frame dal volume condiviso e li pubblica su ROS2
 
 Pubblica:
     - /camera_front/image (Image) - frame BGR dalla camera
 
-Prova ad aprire la camera via V4L2 diretto (/dev/video0),
-con fallback a pipeline GStreamer se necessario.
+Lo script camera_host.py (sull'host Jetson) cattura i frame dalla camera CSI
+e li salva come shared_frame.jpg nel volume condiviso.
+Questo nodo li legge e li pubblica come topic ROS2 per il sense_node.
 """
 
+import os
 import cv2
 import rclpy
 from rclpy.node import Node
@@ -20,84 +22,65 @@ except ImportError:
     from image_utils import cv2_to_imgmsg
 
 
+SHARED_FRAME_PATH = '/home/ubuntu/sense_ws/shared_frame.jpg'
+
+
 class CameraNode(Node):
-    """Nodo ROS2 che cattura frame dalla camera e li pubblica."""
+    """Nodo ROS2 che legge frame dal volume condiviso e li pubblica."""
 
     def __init__(self):
         super().__init__('camera_node')
-        self.get_logger().info('=== Camera Node Starting ===')
+        self.get_logger().info('=== Camera Node Starting (shared volume mode) ===')
 
         self.pub = self.create_publisher(Image, '/camera_front/image', 10)
+        self.frame_path = SHARED_FRAME_PATH
+        self.last_mtime = 0.0
 
-        # Prova ad aprire la camera: prima V4L2 diretto, poi GStreamer come fallback
-        self.cap = None
-        self._open_camera()
+        self.get_logger().info(f'Leggo frame da: {self.frame_path}')
+        self.get_logger().info('Assicurati che camera_host.py sia in esecuzione sull\'host!')
 
-        if self.cap is None or not self.cap.isOpened():
-            self.get_logger().error(
-                'Impossibile aprire la camera! '
-                'Verifica: 1) device montato (--device /dev/video0) '
-                '2) permessi corretti su /dev/video0'
-            )
-            return
-
-        self.get_logger().info('Camera aperta con successo')
-        # Timer a 15 FPS per catturare e pubblicare frame
+        # Timer a 15 FPS per controllare e pubblicare nuovi frame
         self.timer = self.create_timer(1.0 / 15, self._publish_frame)
 
-    def _open_camera(self):
-        """Prova ad aprire la camera con diversi backend, in ordine di priorità."""
-
-        # 1) V4L2 diretto — il più affidabile dentro Docker
-        self.get_logger().info('Tentativo 1: V4L2 diretto /dev/video0 ...')
-        cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.get_logger().info('Camera aperta via V4L2 diretto')
-            self.cap = cap
-            return
-
-        # 2) Device index generico (OpenCV sceglie il backend)
-        self.get_logger().info('Tentativo 2: device index 0 (auto-backend) ...')
-        cap = cv2.VideoCapture(0)
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.get_logger().info('Camera aperta via auto-backend')
-            self.cap = cap
-            return
-
-        # 3) GStreamer pipeline come ultimo tentativo
-        pipeline = (
-            "v4l2src device=/dev/video0 ! "
-            "video/x-raw, width=640, height=480 ! "
-            "videoconvert ! video/x-raw, format=BGR ! appsink"
-        )
-        self.get_logger().info(f'Tentativo 3: GStreamer pipeline: {pipeline}')
-        cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-        if cap.isOpened():
-            self.get_logger().info('Camera aperta via GStreamer')
-            self.cap = cap
-            return
-
-        self.get_logger().error('Tutti i tentativi di apertura camera falliti!')
+        # Log periodico se il file non esiste
+        self._warn_count = 0
 
     def _publish_frame(self):
-        """Cattura un frame dalla camera e lo pubblica sul topic."""
-        ret, frame = self.cap.read()
-        if ret:
-            msg = cv2_to_imgmsg(frame, encoding='bgr8')
-            msg.header.stamp = self.get_clock().now().to_msg()
-            msg.header.frame_id = 'camera_front'
-            self.pub.publish(msg)
-        else:
-            self.get_logger().warn('Frame non letto dalla camera', throttle_duration_sec=5.0)
+        """Legge il frame dal file condiviso e lo pubblica."""
+        if not os.path.exists(self.frame_path):
+            self._warn_count += 1
+            if self._warn_count % 75 == 1:  # Log ogni ~5 secondi
+                self.get_logger().warn(
+                    f'{self.frame_path} non trovato. '
+                    'Avvia camera_host.py sull\'host Jetson!'
+                )
+            return
 
-    def destroy_node(self):
-        if hasattr(self, 'cap') and self.cap is not None:
-            self.cap.release()
-        super().destroy_node()
+        try:
+            # Controlla se il file è stato aggiornato
+            mtime = os.path.getmtime(self.frame_path)
+            if mtime <= self.last_mtime:
+                return  # Nessun nuovo frame
+
+            self.last_mtime = mtime
+            frame = cv2.imread(self.frame_path)
+
+            if frame is not None:
+                msg = cv2_to_imgmsg(frame, encoding='bgr8')
+                msg.header.stamp = self.get_clock().now().to_msg()
+                msg.header.frame_id = 'camera_front'
+                self.pub.publish(msg)
+            else:
+                self.get_logger().warn(
+                    'Frame letto ma non valido',
+                    throttle_duration_sec=5.0
+                )
+
+        except Exception as e:
+            self.get_logger().warn(
+                f'Errore lettura frame: {e}',
+                throttle_duration_sec=5.0
+            )
 
 
 def main(args=None):

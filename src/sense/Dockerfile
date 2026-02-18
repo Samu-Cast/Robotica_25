@@ -15,16 +15,9 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-colcon-common-extensions \
     python3-numpy \
-    #OpenCV di sistema (senza cv_bridge - usiamo image_utils.py)
     python3-opencv \
-    #Librerie di sistema per OpenCV
     libglib2.0-0 \
     libgl1-mesa-glx \
-    #dipendenze GStreamer per V4L2 camera
-    libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev \
-    gstreamer1.0-plugins-good \
-    v4l-utils \
     #CycloneDDS per compatibilità iCreate3
     ros-foxy-rmw-cyclonedds-cpp \
     #Utilità
@@ -40,12 +33,10 @@ WORKDIR /home/ubuntu/irobot_ws
 RUN . /opt/ros/foxy/setup.sh && \
     colcon build --symlink-install --packages-select irobot_create_msgs
 
-#Dipendenze Python (YOLO per human detection)
+#Dipendenze Python
 WORKDIR /home/ubuntu/sense_ws
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --default-timeout=300 --retries 10 \
-    -r requirements.txt && \
-    pip3 uninstall -y opencv-python-headless opencv-python opencv-contrib-python 2>/dev/null; true
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 #Configurazione shell
 RUN echo "source /opt/ros/foxy/setup.bash" >> ~/.bashrc && \

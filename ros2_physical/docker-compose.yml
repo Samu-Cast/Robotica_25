@@ -6,11 +6,8 @@ services:
     build:
       context: ../src/sense
     container_name: charlie_sense_physical
-    privileged: true
     network_mode: host
     restart: unless-stopped
-    devices:
-      - "/dev/video0:/dev/video0"
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
