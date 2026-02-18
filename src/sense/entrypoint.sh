@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+#Rimuovi opencv-python di pip (se presente) per evitare conflitti con cv_bridge
+pip3 uninstall -y opencv-python-headless opencv-python 2>/dev/null || true
+
 #Carica l'ambiente ROS 2 Foxy
 source /opt/ros/foxy/setup.bash
 

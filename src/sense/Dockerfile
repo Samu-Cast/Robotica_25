@@ -40,11 +40,12 @@ WORKDIR /home/ubuntu/irobot_ws
 RUN . /opt/ros/foxy/setup.sh && \
     colcon build --symlink-install --packages-select irobot_create_msgs
 
-#Dipendenze Python (YOLO, OpenCV, NumPy)
+#Dipendenze Python (YOLO, NumPy)
 WORKDIR /home/ubuntu/sense_ws
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir --default-timeout=300 --retries 10 \
-    -r requirements.txt
+    -r requirements.txt && \
+    pip3 uninstall -y opencv-python-headless opencv-python 2>/dev/null; true
 
 #Configurazione shell
 RUN echo "source /opt/ros/foxy/setup.bash" >> ~/.bashrc && \
