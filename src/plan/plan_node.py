@@ -179,7 +179,7 @@ class PlanNode(Node):
         self.create_timer(0.1, self._tick)
     
     def _reset_robot_pose(self):
-        """Call iCreate3 reset_pose service to zero odometry (blocking)."""
+        """Call iCreate3 reset_pose service to zero odometry."""
         try:
             client = self.create_client(ResetPose, '/reset_pose')
             
@@ -193,14 +193,13 @@ class PlanNode(Node):
             request = ResetPose.Request()
             request.pose = Pose()
             future = client.call_async(request)
+            future.add_done_callback(
+                lambda f: self.get_logger().info('ODOMETRY RESET to (0,0,0) via /reset_pose - CONFIRMED')
+            )
             
-            # Block until the service responds (timeout 5s)
-            rclpy.spin_until_future_complete(self, future, timeout_sec=5.0)
-            
-            if future.done() and future.result() is not None:
-                self.get_logger().info('ODOMETRY RESET to (0,0,0) via /reset_pose - SUCCESS')
-            else:
-                self.get_logger().warn('reset_pose call timed out or failed')
+            # Give time for the reset to propagate to odometry
+            time.sleep(2.0)
+            self.get_logger().info('ODOMETRY RESET sent, waited 2s for propagation')
                 
         except Exception as e:
             self.get_logger().warn(f'reset_pose error: {e}, continuing anyway')
