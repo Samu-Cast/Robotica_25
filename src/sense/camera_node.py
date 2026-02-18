@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Camera Node - Cattura frame dalla camera CSI del Jetson e li pubblica su ROS2
+Camera Node - Cattura frame dalla camera e li pubblica su ROS2
 
 Pubblica:
-    - /camera_front/image (Image) - frame BGR dalla camera CSI
+    - /camera_front/image (Image) - frame BGR dalla camera
 
-Utilizza la pipeline GStreamer nvarguscamerasrc per accedere alla camera CSI
-(es. IMX219) attraverso l'interfaccia NVIDIA Argus del Jetson.
+Prova ad aprire la camera via V4L2 diretto (/dev/video0),
+con fallback a pipeline GStreamer se necessario.
 """
 
 import cv2
@@ -16,22 +16,8 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 
 
-def get_jetson_gstreamer_source(width=640, height=480, fps=30):
-    """Pipeline GStreamer V4L2 per camera su Jetson via /dev/video0.
-
-    Usa v4l2src invece di nvarguscamerasrc, così funziona dentro Docker
-    senza bisogno di runtime nvidia o plugin L4T.
-    """
-    return (
-        f"v4l2src device=/dev/video0 ! "
-        f"video/x-raw, width={width}, height={height}, framerate={fps}/1 ! "
-        f"videoconvert ! "
-        f"video/x-raw, format=BGR ! appsink"
-    )
-
-
 class CameraNode(Node):
-    """Nodo ROS2 che cattura frame dalla camera CSI e li pubblica."""
+    """Nodo ROS2 che cattura frame dalla camera e li pubblica."""
 
     def __init__(self):
         super().__init__('camera_node')
@@ -40,23 +26,59 @@ class CameraNode(Node):
         self.bridge = CvBridge()
         self.pub = self.create_publisher(Image, '/camera_front/image', 10)
 
-        # Apri camera CSI via GStreamer
-        pipeline = get_jetson_gstreamer_source()
-        self.get_logger().info(f'GStreamer pipeline: {pipeline}')
-        self.cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        # Prova ad aprire la camera: prima V4L2 diretto, poi GStreamer come fallback
+        self.cap = None
+        self._open_camera()
 
-        if not self.cap.isOpened():
+        if self.cap is None or not self.cap.isOpened():
             self.get_logger().error(
-                'Impossibile aprire la camera CSI! '
+                'Impossibile aprire la camera! '
                 'Verifica: 1) device montato (--device /dev/video0) '
-                '2) argus_socket montato (/tmp/argus_socket) '
-                '3) runtime nvidia abilitato'
+                '2) permessi corretti su /dev/video0'
             )
             return
 
-        self.get_logger().info('Camera CSI aperta con successo')
-        # Timer a 30 FPS per catturare e pubblicare frame
-        self.timer = self.create_timer(1.0 / 30, self._publish_frame)
+        self.get_logger().info('Camera aperta con successo')
+        # Timer a 15 FPS per catturare e pubblicare frame
+        self.timer = self.create_timer(1.0 / 15, self._publish_frame)
+
+    def _open_camera(self):
+        """Prova ad aprire la camera con diversi backend, in ordine di priorità."""
+
+        # 1) V4L2 diretto — il più affidabile dentro Docker
+        self.get_logger().info('Tentativo 1: V4L2 diretto /dev/video0 ...')
+        cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.get_logger().info('Camera aperta via V4L2 diretto')
+            self.cap = cap
+            return
+
+        # 2) Device index generico (OpenCV sceglie il backend)
+        self.get_logger().info('Tentativo 2: device index 0 (auto-backend) ...')
+        cap = cv2.VideoCapture(0)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.get_logger().info('Camera aperta via auto-backend')
+            self.cap = cap
+            return
+
+        # 3) GStreamer pipeline come ultimo tentativo
+        pipeline = (
+            "v4l2src device=/dev/video0 ! "
+            "video/x-raw, width=640, height=480 ! "
+            "videoconvert ! video/x-raw, format=BGR ! appsink"
+        )
+        self.get_logger().info(f'Tentativo 3: GStreamer pipeline: {pipeline}')
+        cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+        if cap.isOpened():
+            self.get_logger().info('Camera aperta via GStreamer')
+            self.cap = cap
+            return
+
+        self.get_logger().error('Tutti i tentativi di apertura camera falliti!')
 
     def _publish_frame(self):
         """Cattura un frame dalla camera e lo pubblica sul topic."""
