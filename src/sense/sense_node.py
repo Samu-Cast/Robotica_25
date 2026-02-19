@@ -4,7 +4,7 @@ Sense Node - Aggregates sensor data and publishes specialized ROS2 topics
 
 Subscribes to:
     - /ir_intensity (IrIntensityVector) - IR proximity sensors from iCreate3
-    - /camera_front/image (Image) for color detection and human detection
+    - /camera_front/image (Image) for color detection
     - /odom (Odometry) for robot position
 
 Publishes:
@@ -17,15 +17,12 @@ Publishes:
 
 Uses modules:
     - color_detector.py for colored target detection
-    - human_detector.py for person detection (YOLO)
 """
 
 import json
 import numpy as np
 
 import os
-os.environ.setdefault("TORCH_CPP_LOG_LEVEL", "ERROR")
-os.environ.setdefault("KMP_WARNINGS", "0")
 
 import rclpy
 from rclpy.node import Node
@@ -44,10 +41,8 @@ except ImportError:
 # Import detection modules
 try:
     from .color_detector import ColorDetector
-    from .human_detector import HumanDetector
 except ImportError:
     from color_detector import ColorDetector
-    from human_detector import HumanDetector
 
 
 class SenseNode(Node):
@@ -98,12 +93,6 @@ class SenseNode(Node):
         self.color_detector = ColorDetector()
         self.get_logger().info('Color detector initialized')
         
-        self.human_detector = HumanDetector()
-        if self.human_detector.model is not None:
-            self.get_logger().info('Human detector (YOLO) initialized')
-        else:
-            self.get_logger().warn('Human detector not available - YOLO model not loaded')
-        
         # State variables - distances in meters (converted from IR intensity)
         self.proximity_data = {
             'front': float('inf'),
@@ -113,7 +102,6 @@ class SenseNode(Node):
         self.odometry = {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.battery_level = None  # None until first message received
         self.color_detections = {'targets': []}
-        self.human_detections = {'person_detected': False, 'persons': []}
         
         # Last detection state (for event-driven publishing)
         self.last_detection = None
@@ -121,7 +109,6 @@ class SenseNode(Node):
         
         # Frame skipping for CPU optimization
         self.frame_count = 0
-        self.yolo_skip_frames = 5
         self.color_skip_frames = 2
         
         # Image dimensions for centering check
@@ -234,7 +221,7 @@ class SenseNode(Node):
         self.battery_level = msg.percentage * 100.0
     
     def _camera_callback(self, msg: Image):
-        """Process camera image for color and human detection"""
+        """Process camera image for color detection"""
         try:
             self.frame_count += 1
             frame = imgmsg_to_cv2(msg, desired_encoding='bgr8')
@@ -245,10 +232,6 @@ class SenseNode(Node):
             # Color Detection
             if self.frame_count % self.color_skip_frames == 0:
                 self.color_detections = self.color_detector.detect(frame)
-            
-            # Human Detection (YOLO)
-            if self.frame_count % self.yolo_skip_frames == 0:
-                self.human_detections = self.human_detector.detect(frame)
             
             # Process detections and publish if changed
             self._process_and_publish_detection()
@@ -275,7 +258,7 @@ class SenseNode(Node):
             x, y, w, h = bbox
             return abs(w * h)
         else:
-            # [x1, y1, x2, y2] - used by YOLO
+            # [x1, y1, x2, y2] - xyxy format
             x1, y1, x2, y2 = bbox
             return abs(x2 - x1) * abs(y2 - y1)
     
@@ -343,28 +326,6 @@ class SenseNode(Node):
         """Determine current detection and publish if changed"""
         
         candidates = []
-        
-        # Check for persons (YOLO uses xyxy format)
-        for person in self.human_detections.get('persons', []):
-            bbox = person.get('bbox', [0, 0, 0, 0])
-            area = self._calculate_bbox_area(bbox, format='xyxy')
-            
-            # Filter out small detections (too far)
-            if area < self.MIN_BBOX_AREA:
-                continue
-            
-            zone = self._get_horizontal_zone(bbox, format='xyxy')
-            proximity_distance = self._get_proximity_for_zone(zone)
-            
-            candidates.append({
-                'type': 'person',
-                'color': None,
-                'bbox_area': area,
-                'zone': zone,
-                'estimated_distance': self._estimate_distance_from_bbox(area),
-                'proximity_distance': proximity_distance,
-                'confidence': person.get('confidence', 0.0)
-            })
         
         # Check for color targets (color_detector uses xywh format)
         for target in self.color_detections.get('targets', []):
@@ -458,7 +419,7 @@ class SenseNode(Node):
             self.battery_pub.publish(battery_msg)
         
         # Publish detection zone continuously (for color centering in Plan node)
-        # Determine zone from LATEST detections (color or human)
+        # Determine zone from LATEST color detections
         current_zone = 'none'
         
         # Check color targets
@@ -469,14 +430,7 @@ class SenseNode(Node):
                 current_zone = self._get_horizontal_zone(bbox, format='xywh')
                 break
         
-        # Check humans (lower priority, only if no color detected)
-        if current_zone == 'none':
-            for person in self.human_detections.get('persons', []):
-                bbox = person.get('bbox', [0, 0, 0, 0])
-                area = self._calculate_bbox_area(bbox, format='xyxy')
-                if area >= self.MIN_BBOX_AREA:
-                    current_zone = self._get_horizontal_zone(bbox, format='xyxy')
-                    break
+
         
         zone_msg = String()
         zone_msg.data = current_zone
@@ -487,13 +441,6 @@ class SenseNode(Node):
         import cv2
         
         debug = self.color_detector.draw_detections(frame, self.color_detections)
-        
-        # Draw human detections
-        for person in self.human_detections.get('persons', []):
-            x1, y1, x2, y2 = [int(v) for v in person['bbox']]
-            cv2.rectangle(debug, (x1, y1), (x2, y2), (255, 0, 255), 2)
-            cv2.putText(debug, f"Person {person['confidence']:.2f}", (x1, y1 - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
         
         # Draw sensor info (distances in meters, converted from IR)
         ir_text = f"IR: F={self.proximity_data['front']:.2f}m FL={self.proximity_data['front_left']:.2f}m FR={self.proximity_data['front_right']:.2f}m"

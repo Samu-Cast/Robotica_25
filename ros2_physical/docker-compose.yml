@@ -15,11 +15,11 @@ services:
       - ../src/sense/:/home/ubuntu/sense_ws/
       - ../models/:/home/ubuntu/models/
       #- /dev/shm:/dev/shm
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 2G
+      #deploy:
+      #  resources:
+      #    limits:
+      #      cpus: '2.0'
+      #      memory: 2G
     stdin_open: true
     tty: true
     command: python3 sense_node.py

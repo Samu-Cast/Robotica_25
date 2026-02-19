@@ -16,13 +16,10 @@ RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     python3-numpy \
     python3-opencv \
-    libglib2.0-0 \
-    libgl1-mesa-glx \
     #CycloneDDS per compatibilità iCreate3
     ros-foxy-rmw-cyclonedds-cpp \
     #Utilità
     git \
-    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 #irobot_create_msgs (build da sorgente per Foxy)
