@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Camera Host - Cattura frame dalla camera CSI del Jetson e li salva su disco.
+Camera Host - Cattura frame dalla camera CSI del Jetson e li salva su /dev/shm.
 
 Questo script gira SULL'HOST (fuori Docker) perché la camera CSI
 richiede il driver NVIDIA Argus che non è disponibile nel container.
 
-I frame vengono salvati nel volume condiviso con il container sense,
-che li legge e li pubblica come topic ROS2.
+I frame vengono salvati in /dev/shm (RAM-backed tmpfs), condiviso
+con il container sense tramite bind-mount, che li legge e li pubblica
+come topic ROS2.
 
 Uso:
     python3 camera_host.py
 
-Il file viene salvato in: src/sense/shared_frame.jpg
-(che nel container è: /home/ubuntu/sense_ws/shared_frame.jpg)
+Il file viene salvato in: /dev/shm/shared_frame.jpg
 """
 
 import cv2
@@ -47,10 +47,9 @@ def open_camera():
     return cap if cap.isOpened() else None
 
 def main():
-    # Percorso di output: nella stessa cartella dello script (volume condiviso)
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_path = os.path.join(script_dir, 'shared_frame.jpg')
-    tmp_path = os.path.join(script_dir, 'shared_frame.tmp.jpg')
+    # Percorso di output: /dev/shm (RAM-backed tmpfs, condiviso con Docker)
+    output_path = '/dev/shm/shared_frame.jpg'
+    tmp_path = '/dev/shm/shared_frame.tmp.jpg'
 
     fps = 15
     interval = 1.0 / fps

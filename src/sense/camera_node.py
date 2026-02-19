@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Camera Node - Legge frame dal volume condiviso e li pubblica su ROS2
+Camera Node - Legge frame da /dev/shm e li pubblica su ROS2
 
 Pubblica:
     - /camera_front/image (Image) - frame BGR dalla camera
 
 Lo script camera_host.py (sull'host Jetson) cattura i frame dalla camera CSI
-e li salva come shared_frame.jpg nel volume condiviso.
+e li salva come /dev/shm/shared_frame.jpg (RAM-backed tmpfs condiviso).
 Questo nodo li legge e li pubblica come topic ROS2 per il sense_node.
 """
 
@@ -22,7 +22,7 @@ except ImportError:
     from image_utils import cv2_to_imgmsg
 
 
-SHARED_FRAME_PATH = '/home/ubuntu/sense_ws/shared_frame.jpg'
+SHARED_FRAME_PATH = '/dev/shm/shared_frame.jpg'
 
 
 class CameraNode(Node):
