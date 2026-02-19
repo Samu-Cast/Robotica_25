@@ -7,7 +7,6 @@ services:
       context: ../src/sense
     container_name: charlie_sense_physical
     network_mode: host
-    restart: unless-stopped
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
@@ -15,7 +14,7 @@ services:
     volumes:
       - ../src/sense/:/home/ubuntu/sense_ws/
       - ../models/:/home/ubuntu/models/
-      - /dev/shm:/dev/shm
+      #- /dev/shm:/dev/shm
     deploy:
       resources:
         limits:
@@ -30,7 +29,6 @@ services:
       context: ../src/plan
     container_name: charlie_plan_physical
     network_mode: host
-    restart: unless-stopped
     depends_on:
       - sense
     environment:
@@ -48,7 +46,6 @@ services:
       context: ../src/act
     container_name: charlie_act_physical
     network_mode: host
-    restart: unless-stopped
     depends_on:
       - sense
     environment:
