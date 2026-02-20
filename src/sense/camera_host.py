@@ -8,6 +8,9 @@ richiede il driver NVIDIA Argus che non è disponibile nel container.
 I frame vengono salvati nel volume condiviso con il container sense,
 che li legge e li pubblica come topic ROS2.
 
+NOTA: Usa GStreamer via subprocess (non OpenCV VideoCapture) perché
+OpenCV 3.2 sul Jetson non ha il backend GStreamer compilato.
+
 Uso:
     python3 camera_host.py
 
@@ -16,97 +19,86 @@ Il file viene salvato in: src/sense/shared_frame.jpg
 """
 
 import cv2
+import numpy as np
 import os
 import time
 import sys
+import subprocess
 
-def open_camera():
-    """Ottimizzato per Jetson CSI Camera."""
-    
-    # === 1. Pipeline GStreamer con nvarguscamerasrc (Jetson CSI) ===
-    pipeline = (
-        "nvarguscamerasrc ! "
-        "video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! "
-        "nvvidconv flip-method=0 ! "
-        "video/x-raw, width=640, height=480, format=BGRx ! "
-        "videoconvert ! "
-        "video/x-raw, format=BGR ! appsink drop=True"
-    )
-
-    print('[camera_host] Tentativo 1: GStreamer nvarguscamerasrc...')
-    cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-    
-    if cap.isOpened():
-        print('[camera_host] Camera CSI aperta con successo!')
-        return cap
-    print('[camera_host] nvarguscamerasrc fallito.')
-
-    # === 2. Pipeline GStreamer con v4l2src (USB camera o /dev/video0) ===
-    pipeline_v4l2 = (
-        "v4l2src device=/dev/video0 ! "
-        "video/x-raw, width=640, height=480, framerate=30/1 ! "
-        "videoconvert ! "
-        "video/x-raw, format=BGR ! appsink drop=True"
-    )
-    print('[camera_host] Tentativo 2: GStreamer v4l2src...')
-    cap = cv2.VideoCapture(pipeline_v4l2, cv2.CAP_GSTREAMER)
-    
-    if cap.isOpened():
-        print('[camera_host] Camera V4L2 (GStreamer) aperta!')
-        return cap
-    print('[camera_host] v4l2src fallito.')
-
-    # === 3. Fallback: OpenCV diretto (compatibile con vecchie versioni) ===
-    print('[camera_host] Tentativo 3: OpenCV diretto /dev/video0...')
-    cap = cv2.VideoCapture(0)
-    if cap.isOpened():
-        print('[camera_host] Camera aperta con OpenCV diretto!')
-        return cap
-
-    # Diagnostica
-    print('[camera_host] TUTTI I TENTATIVI FALLITI!')
-    print('[camera_host] Diagnostica:')
-    print(f'[camera_host]   OpenCV version: {cv2.__version__}')
-    print(f'[camera_host]   GStreamer support: {cv2.getBuildInformation().find("GStreamer") > 0}')
-    import subprocess
-    result = subprocess.run(['ls', '-la', '/dev/video*'], capture_output=True, text=True, shell=False)
-    print(f'[camera_host]   /dev/video*: {result.stdout.strip() or "NESSUN DEVICE TROVATO"}')
-    return None
+# Configurazione
+WIDTH = 640
+HEIGHT = 480
+FPS = 15
+FRAME_SIZE = WIDTH * HEIGHT * 3  # BGR = 3 bytes per pixel
 
 def main():
-    # Percorso di output: nella stessa cartella dello script (volume condiviso)
     script_dir = os.path.dirname(os.path.abspath(__file__))
     output_path = os.path.join(script_dir, 'shared_frame.jpg')
     tmp_path = os.path.join(script_dir, 'shared_frame.tmp.jpg')
 
-    fps = 15
-    interval = 1.0 / fps
+    interval = 1.0 / FPS
 
-    cap = open_camera()
-    if cap is None:
-        print('[camera_host] ERRORE: impossibile aprire la camera!')
-        print('[camera_host] Verifica che /dev/video0 esista e la camera sia collegata.')
+    # Pipeline GStreamer che scrive frame BGR raw su stdout
+    # Funziona perché gst-launch-1.0 supporta nvarguscamerasrc nativamente
+    gst_cmd = [
+        'gst-launch-1.0', '-q',
+        'nvarguscamerasrc', '!',
+        'video/x-raw(memory:NVMM), width={}, height={}, format=NV12, framerate={}/1'.format(WIDTH, HEIGHT, FPS), '!',
+        'nvvidconv', 'flip-method=0', '!',
+        'video/x-raw, width={}, height={}, format=BGRx'.format(WIDTH, HEIGHT), '!',
+        'videoconvert', '!',
+        'video/x-raw, format=BGR', '!',
+        'fdsink', 'fd=1'
+    ]
+
+    print('[camera_host] Avvio GStreamer pipeline via subprocess...')
+    print('[camera_host] Risoluzione: {}x{} @ {}fps'.format(WIDTH, HEIGHT, FPS))
+
+    try:
+        proc = subprocess.Popen(
+            gst_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=FRAME_SIZE * 2
+        )
+    except FileNotFoundError:
+        print('[camera_host] ERRORE: gst-launch-1.0 non trovato!')
         sys.exit(1)
 
-    print(f'[camera_host] Cattura attiva a ~{fps} FPS')
-    print(f'[camera_host] Salvataggio in: {output_path}')
+    # Verifica che il processo sia partito
+    time.sleep(1.0)
+    if proc.poll() is not None:
+        stderr = proc.stderr.read().decode('utf-8', errors='replace')
+        print('[camera_host] ERRORE: GStreamer terminato subito!')
+        print('[camera_host] Stderr: {}'.format(stderr))
+        sys.exit(1)
+
+    print('[camera_host] Pipeline attiva! Salvataggio in: {}'.format(output_path))
     print('[camera_host] Ctrl+C per uscire')
 
     frame_count = 0
     try:
         while True:
             t0 = time.time()
-            ret, frame = cap.read()
-            if ret:
-                # Scrittura atomica: scrivi su .tmp poi rinomina
-                cv2.imwrite(tmp_path, frame)
+
+            # Leggi esattamente un frame BGR raw dallo stdout
+            raw = proc.stdout.read(FRAME_SIZE)
+            if len(raw) != FRAME_SIZE:
+                print('[camera_host] WARN: frame incompleto ({}/{}), stream terminato?'.format(len(raw), FRAME_SIZE))
+                break
+
+            # Converti bytes raw in immagine numpy BGR
+            frame = np.frombuffer(raw, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3))
+
+            # Salva come JPEG (scrittura atomica: tmp + rename)
+            ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if ok:
+                with open(tmp_path, 'wb') as f:
+                    f.write(buf.tobytes())
                 os.rename(tmp_path, output_path)
                 frame_count += 1
-                if frame_count % (fps * 5) == 0:  # Log ogni 5 secondi
-                    print(f'[camera_host] Frame #{frame_count} salvato ({frame.shape})')
-            else:
-                print('[camera_host] WARN: frame non letto, riprovo...')
-                time.sleep(0.5)
+                if frame_count % (FPS * 5) == 0:  # Log ogni 5 secondi
+                    print('[camera_host] Frame #{} salvato ({}x{})'.format(frame_count, WIDTH, HEIGHT))
 
             # Mantieni il framerate
             elapsed = time.time() - t0
@@ -116,11 +108,11 @@ def main():
     except KeyboardInterrupt:
         print('\n[camera_host] Chiusura...')
     finally:
-        cap.release()
-        # Pulizia file temporaneo
+        proc.terminate()
+        proc.wait(timeout=5)
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        print('[camera_host] Camera rilasciata.')
+        print('[camera_host] Terminato dopo {} frame.'.format(frame_count))
 
 
 if __name__ == '__main__':
