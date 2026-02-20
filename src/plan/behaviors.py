@@ -411,10 +411,10 @@ class AtTarget(py_trees.behaviour.Behaviour):
         color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
         
         # ============================================================================
-        # TARGET REACHED: Apply x/y correction and complete
+        # TARGET REACHED: Color detected = target confirmed
         # ============================================================================
-        if target_close and color_matches_target:
-            print(f"[PLAN] TARGET REACHED: {target_name.upper()} (sensor: {min_distance:.2f}m) | Color: {detected_color}")
+        if color_matches_target:
+            print(f"[PLAN] TARGET CONFIRMED: {target_name.upper()} | Color: {detected_color}")
             
             # Calculate and apply odometry correction (x/y only, no theta)
             target_coords = KNOWN_TARGETS.get(target_name, {})
@@ -445,47 +445,12 @@ class AtTarget(py_trees.behaviour.Behaviour):
 
             self.bb.set("plan_action", "STOP")
             
-            # Pausa 3 secondi al target prima di procedere
-            time.sleep(3.0)
-            
             # Reset state for next target
             self.bb.set("current_target", None)
             self._color_detected_logged = False
             self._centering_complete = False
             
             return Status.SUCCESS
-        
-        # ============================================================================
-        # COLOR DETECTION & CENTERING (< 1 meter, correct color only)
-        # ============================================================================
-        if color_matches_target and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
-            # Log once when color first detected
-            if not self._color_detected_logged:
-                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
-                self._color_detected_logged = True 
-                self._centering_complete = False
-            
-            # Center color in camera frame
-            if detection_zone and detection_zone != 'center':
-                if detection_zone == 'left':
-                    self.bb.set("plan_action", "MOVE_FRONT_LEFT")
-                elif detection_zone == 'right':
-                    self.bb.set("plan_action", "MOVE_FRONT_RIGHT")
-                self._centering_complete = False
-                return Status.RUNNING
-            else:
-                # Color is centered - advance straight
-                if not self._centering_complete:
-                    print(f"[PLAN] COLOR CENTERED - advancing to {target_name.upper()}...")
-                    self._centering_complete = True
-                
-                self.bb.set("plan_action", "MOVE_FORWARD")
-                return Status.RUNNING
-        
-        # Reset centering when color is lost or too far
-        if not color_matches_target or distance_to_target > self.COLOR_DETECTION_DISTANCE:
-            self._color_detected_logged = False
-            self._centering_complete = False
         
         # Not at target yet
         return Status.FAILURE
@@ -761,8 +726,11 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         if distance_to_target < self.SEARCH_DISTANCE and not color_matches_target:
             # Near target position but don't see the correct color - scan for it
             if not self._search_logged:
-                print(f"[PLAN] SEARCH MODE: Near {target_name.upper()} (odom: {distance_to_target:.2f}m) - scanning...")
+                print(f"[PLAN] SEARCH MODE: Near {target_name.upper()} (odom: {distance_to_target:.2f}m) - stopping 3s before scanning...")
                 self._search_logged = True
+                self.bb.set("plan_action", "STOP")
+                time.sleep(3.0)
+                print(f"[PLAN] SEARCH MODE: Now scanning for {target_name.upper()}...")
             
             # If we see the color but it's not centered, turn toward it
             if color_matches_target and detection_zone:
