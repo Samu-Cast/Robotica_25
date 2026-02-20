@@ -490,11 +490,12 @@ class AtTarget(py_trees.behaviour.Behaviour):
 
 class InitialRetreat(py_trees.behaviour.Behaviour):
     """
-    Startup sequence with 3 phases:
+    Startup sequence with 2 phases:
     1. RETREAT: Move backward 0.5m to get away from base station
     2. ROTATE: Turn left 180° to face the room
-    3. RESET_ORIGIN: Set current position as (0,0,0) origin
     
+    Odometry is reset ONLY at startup (by plan_node via /reset_pose service),
+    NOT after the rotation — re-zeroing after the 180° turn caused drift issues.
     Home/base station position is saved by plan_node BEFORE this runs.
     """
     RETREAT_DISTANCE = 0.5  # meters to retreat
@@ -507,9 +508,8 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         self.bb.register_key("startup_complete", access=py_trees.common.Access.WRITE)
         self.bb.register_key("startup_complete", access=py_trees.common.Access.READ)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
-        self.bb.register_key("origin_offset", access=py_trees.common.Access.WRITE)
         
-        self._phase = "RETREAT"  # RETREAT -> ROTATE -> RESET_ORIGIN
+        self._phase = "RETREAT"  # RETREAT -> ROTATE -> done
         self._start_position = None
         self._rotate_start_theta = None
         self._total_rotated = 0.0
@@ -568,28 +568,11 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
                 return Status.RUNNING
             else:
                 print(f"[STARTUP] Phase 2 DONE: rotated {math.degrees(self._total_rotated):.0f}°")
-                self._phase = "RESET_ORIGIN"
+                # Startup complete — no origin reset, odometry was already zeroed at startup
+                self.bb.set("startup_complete", True)
                 self.bb.set("plan_action", "STOP")
-                return Status.RUNNING
-        
-        # ===== PHASE 3: RESET ORIGIN =====
-        if self._phase == "RESET_ORIGIN":
-            # Current robot_position already has the old offset applied.
-            # We need to set origin_offset = current raw position
-            # so that corrected position = raw - offset = (0, 0, 0)
-            # Since current offset is (0,0,0) at startup, robot_position IS the raw position
-            origin = {
-                'x': robot_pos['x'],
-                'y': robot_pos['y'],
-                'theta': robot_pos['theta']
-            }
-            self.bb.set("origin_offset", origin)
-            self.bb.set("startup_complete", True)
-            self.bb.set("plan_action", "STOP")
-            print(f"[STARTUP] Phase 3 DONE: ORIGIN RESET")
-            print(f"[STARTUP] Raw position was ({origin['x']:.2f}, {origin['y']:.2f}, {math.degrees(origin['theta']):.0f}°)")
-            print(f"[STARTUP] New origin = (0.00, 0.00, 0°) - Navigation started!")
-            return Status.SUCCESS
+                print(f"[STARTUP] COMPLETE - Navigation started! (odometry zeroed at boot)")
+                return Status.SUCCESS
         
         return Status.RUNNING
 
