@@ -451,6 +451,40 @@ class AtTarget(py_trees.behaviour.Behaviour):
             self._centering_complete = False
             
             return Status.SUCCESS
+            
+        # ============================================================================
+        # COLOR DETECTION & CENTERING (< 1 meter, correct color only)
+        # ============================================================================
+        if color_matches_target and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
+            # Log once when color first detected
+            if not self._color_detected_logged:
+                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
+                self._color_detected_logged = True 
+                self._centering_complete = False
+            
+            # Center color in camera frame
+            if detection_zone and detection_zone != 'center':
+                if detection_zone == 'left':
+                    self.bb.set("plan_action", "MOVE_FRONT_LEFT")
+                elif detection_zone == 'right':
+                    self.bb.set("plan_action", "MOVE_FRONT_RIGHT")
+                self._centering_complete = False
+                return Status.RUNNING
+            else:
+                # Color is centered - advance straight
+                if not self._centering_complete:
+                    print(f"[PLAN] COLOR CENTERED - advancing to {target_name.upper()}...")
+                    self._centering_complete = True
+                
+                self.bb.set("plan_action", "MOVE_FORWARD")
+                return Status.RUNNING
+        
+        # Reset centering when color is lost or too far
+        if not color_matches_target or distance_to_target > self.COLOR_DETECTION_DISTANCE:
+            self._color_detected_logged = False
+            self._centering_complete = False
+        
+
         
         # Not at target yet
         return Status.FAILURE
