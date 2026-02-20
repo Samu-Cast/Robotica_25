@@ -27,7 +27,7 @@ from py_trees.common import Status, ParallelPolicy
 KNOWN_TARGETS = {
     # Color-based targets - robot will visit these and check for valve
     'green': {'x': -0.5, 'y': 0.0, 'theta': 0.0}, #la x è 
-    #'blue': {'x': 1.0, 'y': 0.0, 'theta': 0.0},
+    #'blue': {'x': 1.0, 'y': 1.0, 'theta': 0.0},
     #'red': {'x': -6.5, 'y': -3.0, 'theta': 3.14},  # This is actually the valve, but robot doesn't know
 }
 
