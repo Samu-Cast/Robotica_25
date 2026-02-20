@@ -1,6 +1,7 @@
 #!/bin/bash
 
 sudo apt update && sudo apt upgrade
+sudo apt install apt-utils
 
 sudo usermod -aG docker $USER
 
@@ -8,6 +9,7 @@ newgrp docker
 
 sudo apt-get update
 sudo apt-get install docker-compose
+
 
 (type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
 	&& sudo mkdir -p -m 755 /etc/apt/keyrings \
