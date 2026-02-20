@@ -23,8 +23,7 @@ import sys
 def open_camera():
     """Ottimizzato per Jetson CSI Camera."""
     
-    # La pipeline GStreamer corretta per Jetson
-    # Nota: 'flip-method=2' ruota di 180 gradi se serve, altrimenti usa 0
+    # === 1. Pipeline GStreamer con nvarguscamerasrc (Jetson CSI) ===
     pipeline = (
         "nvarguscamerasrc ! "
         "video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=30/1 ! "
@@ -34,17 +33,45 @@ def open_camera():
         "video/x-raw, format=BGR ! appsink drop=True"
     )
 
-    print(f'[camera_host] Apertura camera via GStreamer (nvarguscamerasrc)...')
+    print('[camera_host] Tentativo 1: GStreamer nvarguscamerasrc...')
     cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
     
     if cap.isOpened():
-        print('[camera_host] Camera aperta con successo!')
+        print('[camera_host] Camera CSI aperta con successo!')
+        return cap
+    print('[camera_host] nvarguscamerasrc fallito.')
+
+    # === 2. Pipeline GStreamer con v4l2src (USB camera o /dev/video0) ===
+    pipeline_v4l2 = (
+        "v4l2src device=/dev/video0 ! "
+        "video/x-raw, width=640, height=480, framerate=30/1 ! "
+        "videoconvert ! "
+        "video/x-raw, format=BGR ! appsink drop=True"
+    )
+    print('[camera_host] Tentativo 2: GStreamer v4l2src...')
+    cap = cv2.VideoCapture(pipeline_v4l2, cv2.CAP_GSTREAMER)
+    
+    if cap.isOpened():
+        print('[camera_host] Camera V4L2 (GStreamer) aperta!')
+        return cap
+    print('[camera_host] v4l2src fallito.')
+
+    # === 3. Fallback: OpenCV diretto (compatibile con vecchie versioni) ===
+    print('[camera_host] Tentativo 3: OpenCV diretto /dev/video0...')
+    cap = cv2.VideoCapture(0)
+    if cap.isOpened():
+        print('[camera_host] Camera aperta con OpenCV diretto!')
         return cap
 
-    # Fallback se GStreamer fallisce
-    print('[camera_host] GStreamer fallito, provo V4L2...')
-    cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
-    return cap if cap.isOpened() else None
+    # Diagnostica
+    print('[camera_host] TUTTI I TENTATIVI FALLITI!')
+    print('[camera_host] Diagnostica:')
+    print(f'[camera_host]   OpenCV version: {cv2.__version__}')
+    print(f'[camera_host]   GStreamer support: {cv2.getBuildInformation().find("GStreamer") > 0}')
+    import subprocess
+    result = subprocess.run(['ls', '-la', '/dev/video*'], capture_output=True, text=True, shell=False)
+    print(f'[camera_host]   /dev/video*: {result.stdout.strip() or "NESSUN DEVICE TROVATO"}')
+    return None
 
 def main():
     # Percorso di output: nella stessa cartella dello script (volume condiviso)
