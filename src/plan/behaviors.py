@@ -445,6 +445,9 @@ class AtTarget(py_trees.behaviour.Behaviour):
 
             self.bb.set("plan_action", "STOP")
             
+            # Pausa 3 secondi al target prima di procedere
+            time.sleep(3.0)
+            
             # Reset state for next target
             self.bb.set("current_target", None)
             self._color_detected_logged = False
