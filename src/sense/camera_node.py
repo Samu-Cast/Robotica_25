@@ -22,7 +22,7 @@ except ImportError:
     from image_utils import cv2_to_imgmsg
 
 
-SHARED_FRAME_PATH = '/home/ubuntu/sense_ws/shared_frame.jpg'
+SHARED_FRAME_PATH = '/dev/shm/shared_frame.jpg'
 
 
 class CameraNode(Node):

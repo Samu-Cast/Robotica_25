@@ -14,8 +14,8 @@ OpenCV 3.2 sul Jetson non ha il backend GStreamer compilato.
 Uso:
     python3 camera_host.py
 
-Il file viene salvato in: src/sense/shared_frame.jpg
-(che nel container è: /home/ubuntu/sense_ws/shared_frame.jpg)
+Il file viene salvato in: /dev/shm/shared_frame.jpg
+(shared memory, montata anche nel container Docker)
 """
 
 import cv2
@@ -33,8 +33,8 @@ FRAME_SIZE = WIDTH * HEIGHT * 3  # BGR = 3 bytes per pixel
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_path = os.path.join(script_dir, 'shared_frame.jpg')
-    tmp_path = os.path.join(script_dir, 'shared_frame.tmp.jpg')
+    output_path = '/dev/shm/shared_frame.jpg'
+    tmp_path = '/dev/shm/shared_frame.tmp.jpg'
 
     interval = 1.0 / FPS
 
