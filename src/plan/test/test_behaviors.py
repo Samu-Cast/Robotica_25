@@ -341,7 +341,7 @@ class TestBehaviors:
     
     def test_initial_retreat_saves_home(self):
         """
-        InitialRetreat: fase RETREAT poi ROTATE poi RESET_ORIGIN.
+        InitialRetreat: fase RETREAT poi ROTATE (no reset odometria).
         Verifica che la fase 1 manda MOVE_BACKWARD.
         """
         self.bb.set("startup_complete", False)
