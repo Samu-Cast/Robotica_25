@@ -737,14 +737,14 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             # If target is ahead (|angle| < 45°), check front sensor
             # If target is left (angle > 45°), check left sensor  
             # If target is right (angle < -45°), check right sensor
-            CLEAR_THRESHOLD = FRONT_OBSTACLE_DIST * 1.3  # Need a bit more clearance
+            CLEAR_THRESHOLD = FRONT_OBSTACLE_DIST  # Resume as soon as path is clear
             
             if abs(angle_diff) < 0.8:  # ~45° - target is roughly ahead
                 path_clear = d_center > CLEAR_THRESHOLD
             elif angle_diff > 0:  # target is to the left
-                path_clear = d_left > CLEAR_THRESHOLD and d_center > FRONT_OBSTACLE_DIST
+                path_clear = d_center > CLEAR_THRESHOLD
             else:  # target is to the right
-                path_clear = d_right > CLEAR_THRESHOLD and d_center > FRONT_OBSTACLE_DIST
+                path_clear = d_center > CLEAR_THRESHOLD
             
             if path_clear:
                 # Path to target is clear - resume navigation immediately
