@@ -349,8 +349,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
            - Apply x/y odometry correction
            - Mark target as visited, proceed to next target
     """
-    COLOR_DETECTION_DISTANCE = 0.8  # Distance threshold for color detection (meters)
-    PROXIMITY_THRESHOLD = 0.08  # 🔴🔴🔴PRIMA🔴🔴🔴 0.08 Distance to consider target reached (between 0.05 danger and 0.12 medium)
+    PROXIMITY_THRESHOLD = 0.12 # Distance to consider target reached (0.12m)
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -464,11 +463,11 @@ class AtTarget(py_trees.behaviour.Behaviour):
                 self._centering_complete = False
                 return Status.RUNNING
             else:
-                # Color is centered — go straight toward it
+                # Color is centered — go backward for a tick (as requested)
                 if not self._centering_complete:
-                    print(f"[PLAN] COLOR CENTERED - advancing to {target_name.upper()}...")
+                    print(f"[PLAN] COLOR CENTERED - moving backward for {target_name.upper()}...")
                     self._centering_complete = True
-                self.bb.set("plan_action", "MOVE_FORWARD")
+                self.bb.set("plan_action", "MOVE_BACKWARD")
                 return Status.RUNNING
         
         # Color not detected — reset state
@@ -588,7 +587,7 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         - Only change direction if error is large (> threshold).
         - Maintain current direction otherwise (Hysteresis).
     """
-    SEARCH_DISTANCE =  0.12 # Start visual search when within this distance (meters)
+    SEARCH_DISTANCE =  0.5 # Start visual search when within this distance (meters)
     
     def __init__(self):
         super().__init__(name="MoveToTarget")
@@ -617,6 +616,15 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         self._debug_tick = 0  #Contatore per logging periodico
         self._search_ticks = 0  # Count ticks while searching
         self._search_logged = False
+
+    def initialise(self):
+        """ Reset internal state when behavior starts (for a new target) """
+        self.avoiding = False
+        self.recovery_steps = 0
+        self.last_action = "STOP"
+        self._search_ticks = 0
+        self._search_logged = False
+        # print(f"[PLAN] MoveToTarget INITIALISED for new target")
 
     def update(self):
         #Get Target (Persistent)
@@ -717,20 +725,25 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
                 self._debug_tick += 1
                 return Status.RUNNING
 
-            #C. RECOVERY (Post-Avoidance) - Keep turning until center + turning side are clear
+            #C. RECOVERY (Post-Avoidance) - ensure we fully clear the obstacle
             if self.avoiding:
-                # Check center + the side we're turning toward
-                if self.last_action == 'TURN_RIGHT':
-                    side_clear = d_right > SIDE_OBSTACLE_DIST
-                else:
-                    side_clear = d_left > SIDE_OBSTACLE_DIST
-                
-                path_clear = (d_center > FRONT_OBSTACLE_DIST and side_clear)
+                path_clear = (d_center > FRONT_OBSTACLE_DIST and 
+                              d_left > SIDE_OBSTACLE_DIST and 
+                              d_right > SIDE_OBSTACLE_DIST)
                 
                 if path_clear:
-                    self.avoiding = False
-                    self.recovery_steps = 0
-                    print(f"[AVOID] ALL CLEAR - resuming navigation to {target['name'].upper()}")
+                    # Move forward for a few ticks to clear the obstacle corner
+                    PASS_TICKS = 5 # ~0.5s at 10Hz
+                    if self.recovery_steps < PASS_TICKS:
+                        self.recovery_steps += 1
+                        self.bb.set("plan_action", "MOVE_FORWARD")
+                        if self.recovery_steps == 1:
+                            print(f"[AVOID] Path clear - PASSING obstacle ({PASS_TICKS} ticks)...")
+                        return Status.RUNNING
+                    else:
+                        self.avoiding = False
+                        self.recovery_steps = 0
+                        print(f"[AVOID] ALL CLEAR - resuming navigation to {target['name'].upper()}")
                 else:
                     action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
                     self.bb.set("plan_action", action)
@@ -792,20 +805,34 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         HYSTERESIS_THRESHOLD = 0.4  #~23 degrees - switch action only if error is big
         ALIGNMENT_THRESHOLD = 0.2   #~11 degrees - considered aligned with target
         
-        #Decision logic with hysteresis
+        #Decision logic with hysteresis + sensor awareness
+        left_blocked = d_left < SIDE_OBSTACLE_DIST
+        right_blocked = d_right < SIDE_OBSTACLE_DIST
+
         if abs(angle_diff) < ALIGNMENT_THRESHOLD:
             # Well aligned - go straight
             action = 'MOVE_FORWARD'
         elif abs(angle_diff) > HYSTERESIS_THRESHOLD:
-            # Big error - need to correct
+            # Big error - need to correct, but check sensors first
             if angle_diff > 0:
-                action = 'MOVE_FRONT_LEFT'
+                # Target is to our LEFT
+                if left_blocked:
+                    action = 'MOVE_FORWARD' # Don't turn into a wall
+                else:
+                    action = 'MOVE_FRONT_LEFT'
             else:
-                action = 'MOVE_FRONT_RIGHT'
+                # Target is to our RIGHT
+                if right_blocked:
+                    action = 'MOVE_FORWARD' # Don't turn into a wall
+                else:
+                    action = 'MOVE_FRONT_RIGHT'
         else:
             # Medium error - maintain previous action (hysteresis)
             if self.last_action in ['MOVE_FORWARD', 'MOVE_FRONT_LEFT', 'MOVE_FRONT_RIGHT']:
                 action = self.last_action
+                # Clamp if blocked
+                if action == 'MOVE_FRONT_LEFT' and left_blocked: action = 'MOVE_FORWARD'
+                if action == 'MOVE_FRONT_RIGHT' and right_blocked: action = 'MOVE_FORWARD'
             else:
                 #Was doing something else (avoidance) - pick appropriate
                 action = 'MOVE_FORWARD'
