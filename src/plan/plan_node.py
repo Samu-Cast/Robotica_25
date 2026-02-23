@@ -29,11 +29,18 @@ try:
     from sensor_msgs.msg import Range
     from geometry_msgs.msg import Pose2D, Pose
     from irobot_create_msgs.srv import ResetPose
-    from irobot_create_msgs.msg import AudioNoteVector, AudioNote
     ROS2_AVAILABLE = True
 except ImportError:
     ROS2_AVAILABLE = False
     Node = object
+
+#Audio messages (separate try/except to not break ROS2 if unavailable)
+try:
+    from builtin_interfaces.msg import Duration
+    from irobot_create_msgs.msg import AudioNoteVector, AudioNote
+    AUDIO_AVAILABLE = True
+except ImportError:
+    AUDIO_AVAILABLE = False
 
 #Behavior Tree imports
 import py_trees
@@ -141,8 +148,12 @@ class PlanNode(Node):
         self.bt_status_pub = self.create_publisher(String, '/plan/bt_status', 10)  # BT visualization topic
         
         #Audio publisher for iCreate3 speaker
-        self.audio_pub = self.create_publisher(AudioNoteVector, '/cmd_audio', 10)
-        self.bb.set("audio_pub", self.audio_pub)  # Share with behavior nodes
+        if AUDIO_AVAILABLE:
+            self.audio_pub = self.create_publisher(AudioNoteVector, '/cmd_audio', 10)
+            self.bb.set("audio_pub", self.audio_pub)  # Share with behavior nodes
+        else:
+            self.get_logger().warn('AudioNoteVector not available - audio feedback disabled')
+            self.bb.set("audio_pub", None)
         
         #Startup: wait 5 seconds then start BT (no /clock needed on physical robot)
         self._robot_ready = False
