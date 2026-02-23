@@ -28,7 +28,7 @@ cleanup() {
 
     # Ferma docker compose
     echo -e "${YELLOW}[run_jetson] Fermando docker compose...${NC}"
-    docker compose -f "$COMPOSE_DIR/docker-compose.yml" down 2>/dev/null || true
+    docker-compose "$COMPOSE_DIR/docker-compose.yml" down 2>/dev/null || true
 
     # Ferma camera_host
     if [ -n "$CAMERA_PID" ] && kill -0 "$CAMERA_PID" 2>/dev/null; then
@@ -98,4 +98,4 @@ echo -e "${YELLOW}[run_jetson] Premi Ctrl+C per fermare tutto${NC}"
 echo ""
 
 # docker compose up con log in tempo reale (foreground)
-docker compose -f "$COMPOSE_DIR/docker-compose.yml" up --build
+docker-compose "$COMPOSE_DIR/docker-compose.yml" up
