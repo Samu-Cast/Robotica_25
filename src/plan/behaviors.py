@@ -380,14 +380,17 @@ class AtTarget(py_trees.behaviour.Behaviour):
         Check if robot has arrived at the target.
         
         Complete Flow:
-        1. Color Detection (< 1m): Center the color in camera
+        1. Color Detection: Center the color in camera
            - If left/right: turn until centered
-           - Once centered: go straight
-        2. Proximity Detection (front sensor < 0.20m):
-           - Apply x/y odometry correction
-           - Mark target as visited, proceed to next target
+           - Once centered: advance forward
+        2. Proximity Detection (front sensor < threshold):
+           - Enter ARRIVAL sequence:
+             Phase CENTERING: adjust orientation to center the color
+             Phase PAUSING: stop 2s + play sound
+             Phase DONE: apply odom correction, mark visited, SUCCESS
     """
     PROXIMITY_THRESHOLD = 0.12 # Distance to consider target reached (0.12m)
+    PAUSE_TICKS = 20           # 2 seconds at 10Hz
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -408,6 +411,16 @@ class AtTarget(py_trees.behaviour.Behaviour):
         # Internal state
         self._color_detected_logged = False 
         self._centering_complete = False
+        # Arrival sequence state
+        self._arrival_phase = None  # None, "CENTERING", "PAUSING", "DONE"
+        self._pause_counter = 0
+
+    def _reset_state(self):
+        """Reset all internal state for next target."""
+        self._color_detected_logged = False
+        self._centering_complete = False
+        self._arrival_phase = None
+        self._pause_counter = 0
 
     def update(self):
         target = self.bb.get("current_target")
@@ -446,24 +459,40 @@ class AtTarget(py_trees.behaviour.Behaviour):
         color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
         
         # ============================================================================
-        # STEP 1: COLOR DETECTION & CENTERING
-        # When we see the right color, pause 1s then center and approach
+        # ARRIVAL SEQUENCE (once target_close triggered with matching color)
+        # Phase: CENTERING → PAUSING (2s + sound) → DONE (mark visited)
         # ============================================================================
-        if color_matches_target:
-            # First time seeing the color — pause 1 second
-            if not self._color_detected_logged:
-                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
-                self._color_detected_logged = True
-                self._centering_complete = False
+        if self._arrival_phase is not None:
+            
+            # --- Phase CENTERING: orient to center the color ---
+            if self._arrival_phase == "CENTERING":
+                if color_matches_target and detection_zone and detection_zone != 'center':
+                    if detection_zone == 'left':
+                        self.bb.set("plan_action", "TURN_LEFT")
+                    else:
+                        self.bb.set("plan_action", "TURN_RIGHT")
+                    return Status.RUNNING
+                else:
+                    # Centered (or color lost — proceed anyway)
+                    print(f"[PLAN] TARGET CENTERED: {target_name.upper()} - stopping for 2s...")
+                    self.bb.set("plan_action", "STOP")
+                    self._arrival_phase = "PAUSING"
+                    self._pause_counter = 0
+                    # Play sound at the start of the pause
+                    self._play_target_reached_sound()
+                    return Status.RUNNING
+            
+            # --- Phase PAUSING: stay still for 2 seconds ---
+            if self._arrival_phase == "PAUSING":
                 self.bb.set("plan_action", "STOP")
-                print(f"[PLAN] PAUSING 1s before centering...")
-                time.sleep(1.0)
+                self._pause_counter += 1
+                if self._pause_counter >= self.PAUSE_TICKS:
+                    print(f"[PLAN] PAUSE COMPLETE - finalizing {target_name.upper()}")
+                    self._arrival_phase = "DONE"
                 return Status.RUNNING
             
-            # ============================================================================
-            # STEP 2: TARGET REACHED — color matches AND proximity confirms close
-            # ============================================================================
-            if target_close:
+            # --- Phase DONE: apply correction, mark visited, return SUCCESS ---
+            if self._arrival_phase == "DONE":
                 print(f"[PLAN] TARGET REACHED: {target_name.upper()} | Color: {detected_color} | Proximity: {d_center:.2f}m")
                 
                 # Apply odometry correction
@@ -477,7 +506,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
                 print(f"[ODOM] CORRECTION @ {target_name.upper()}: dx={new_correction['dx']:.2f}, dy={new_correction['dy']:.2f}")
                 
                 # Check if valve (red)
-                if detected_color.lower() == "red":
+                if detected_color and detected_color.lower() == "red":
                     self.bb.set("found", "valve")
                     print(f"[PLAN] VALVE FOUND!")
                 
@@ -489,13 +518,27 @@ class AtTarget(py_trees.behaviour.Behaviour):
                 
                 self.bb.set("plan_action", "STOP")
                 self.bb.set("current_target", None)
-                self._color_detected_logged = False
-                self._centering_complete = False
-                
-                # Play celebratory sound on target reached
-                self._play_target_reached_sound()
-                
+                self._reset_state()
                 return Status.SUCCESS
+        
+        # ============================================================================
+        # APPROACH PHASE: color detection, centering, advancing
+        # ============================================================================
+        if color_matches_target:
+            # First time seeing the color
+            if not self._color_detected_logged:
+                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
+                self._color_detected_logged = True
+                self._centering_complete = False
+                self.bb.set("plan_action", "STOP")
+                return Status.RUNNING
+            
+            # Proximity reached → start arrival sequence
+            if target_close:
+                print(f"[PLAN] ARRIVED at {target_name.upper()} - starting arrival sequence (center → pause → done)")
+                self._arrival_phase = "CENTERING"
+                self.bb.set("plan_action", "STOP")
+                return Status.RUNNING
             
             # Not close enough yet — center the color and advance
             if detection_zone and detection_zone != 'center':
