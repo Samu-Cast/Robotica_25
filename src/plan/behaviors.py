@@ -286,6 +286,7 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("detected_color", access=py_trees.common.Access.WRITE)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self._last_logged_target = None  #Evita spam di log
+        self._current_aligned_target = None # Tracks if we have already done initial spin for this target
 
     def update(self):
         #1. Check if we already have a valid pending target (Persistence)
@@ -330,11 +331,42 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
             if closest_name != self._last_logged_target:
                 print(f"[PLAN] NEW TARGET: {closest_name.upper()} @ ({closest_data['x']:.2f}, {closest_data['y']:.2f}) | Dist: {math.sqrt(closest_dist):.2f}m")
                 self._last_logged_target = closest_name
-            return Status.SUCCESS
         
-        # All targets visited
-        #print(f"[PLAN] ALL TARGETS VISITED: {visited}")
-        return Status.FAILURE
+        # 3. ALIGNMENT PHASE: Spin in place to face the target before moving
+        # This only happens at the START of a new target acquisition
+        current = self.bb.get("current_target")
+        if current and self._current_aligned_target != current['name']:
+            # Calculate angle to target
+            target_x = current.get('x', 0.0)
+            target_y = current.get('y', 0.0)
+            dx = target_x - robot_pos['x']
+            dy = target_y - robot_pos['y']
+            target_angle = math.atan2(dy, dx)
+            
+            angle_diff = target_angle - robot_pos['theta']
+            while angle_diff > math.pi: angle_diff -= 2 * math.pi
+            while angle_diff < -math.pi: angle_diff += 2 * math.pi
+            
+            ALIGN_THRESHOLD = 0.3 # ~17 degrees for initial spin
+            
+            if abs(angle_diff) > ALIGN_THRESHOLD:
+                # Still need to align
+                action = 'TURN_LEFT' if angle_diff > 0 else 'TURN_RIGHT'
+                self.bb.set("plan_action", action)
+                if self._debug_tick % 20 == 0:
+                    print(f"[PLAN] INITIAL ALIGNMENT to {current['name'].upper()}: diff={math.degrees(angle_diff):.0f}deg")
+                self._debug_tick += 1
+                return Status.RUNNING
+            else:
+                # Aligned! Continue to success
+                print(f"[PLAN] ALIGNED with {current['name'].upper()} - starting navigation flow")
+                self._current_aligned_target = current['name']
+                self.bb.set("plan_action", "STOP")
+                # return Status.SUCCESS (implicitly continues below)
+
+        # All targets visited?
+        # print(f"[PLAN] CalculateTarget status: {Status.SUCCESS if current else Status.FAILURE}")
+        return Status.SUCCESS if current else Status.FAILURE
 
 
 class AtTarget(py_trees.behaviour.Behaviour):
