@@ -289,48 +289,45 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
         self._current_aligned_target = None # Tracks if we have already done initial spin for this target
 
     def update(self):
-        #1. Check if we already have a valid pending target (Persistence)
+        # 0. Get current state from blackboard
         current = self.bb.get("current_target")
         visited = self.bb.get("visited_targets") or []
-        
-        if current and current['name'] not in visited:
-             #Keep current target until visited
-             return Status.SUCCESS
-             
         robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
-        
-        #Apply odometry correction if available
         odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+        
         robot_pos = {
             'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
             'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
             'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
         }
+
+        # 1. Select NEW target if current is missing or already visited
+        if not current or current['name'] in visited:
+            closest_name = None
+            closest_dist = float('inf')
+            closest_data = None
+            
+            for name, data in KNOWN_TARGETS.items():
+                if name not in visited:
+                    dist = (data['x'] - robot_pos['x'])**2 + (data['y'] - robot_pos['y'])**2
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        closest_name = name
+                        closest_data = data
+            
+            if closest_name:
+                self.bb.set("current_target", {
+                    'name': closest_name,
+                    'x': closest_data['x'],
+                    'y': closest_data['y'],
+                    'theta': closest_data['theta']
+                })
+                # Log only when target changes
+                if closest_name != self._last_logged_target:
+                    print(f"[PLAN] NEW TARGET: {closest_name.upper()} @ ({closest_data['x']:.2f}, {closest_data['y']:.2f}) | Dist: {math.sqrt(closest_dist):.2f}m")
+                    self._last_logged_target = closest_name
+                current = self.bb.get("current_target") # Update local reference
         
-        #2. Select NEW closest unvisited target
-        closest_name = None
-        closest_dist = float('inf')
-        closest_data = None
-        
-        for name, data in KNOWN_TARGETS.items():
-            if name not in visited:
-                dist = (data['x'] - robot_pos['x'])**2 + (data['y'] - robot_pos['y'])**2
-                if dist < closest_dist:
-                    closest_dist = dist
-                    closest_name = name
-                    closest_data = data
-        
-        if closest_name:
-            self.bb.set("current_target", {
-                'name': closest_name,
-                'x': closest_data['x'],
-                'y': closest_data['y'],
-                'theta': closest_data['theta']
-            })
-            # Log only when target changes
-            if closest_name != self._last_logged_target:
-                print(f"[PLAN] NEW TARGET: {closest_name.upper()} @ ({closest_data['x']:.2f}, {closest_data['y']:.2f}) | Dist: {math.sqrt(closest_dist):.2f}m")
-                self._last_logged_target = closest_name
         
         # 3. ALIGNMENT PHASE: Spin in place to face the target before moving
         # This only happens at the START of a new target acquisition
@@ -495,11 +492,11 @@ class AtTarget(py_trees.behaviour.Behaviour):
                 self._centering_complete = False
                 return Status.RUNNING
             else:
-                # Color is centered — go backward for a tick (as requested)
+                # Color is centered — go straight toward it
                 if not self._centering_complete:
-                    print(f"[PLAN] COLOR CENTERED - moving backward for {target_name.upper()}...")
+                    print(f"[PLAN] COLOR CENTERED - advancing to {target_name.upper()}...")
                     self._centering_complete = True
-                self.bb.set("plan_action", "MOVE_BACKWARD")
+                self.bb.set("plan_action", "MOVE_FORWARD")
                 return Status.RUNNING
         
         # Color not detected — reset state
@@ -801,8 +798,8 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             if self._search_ticks % 20 == 0:
                 print(f"[PLAN] SCANNING for {target_name.upper()}... (ticks: {self._search_ticks})")
             
-            # Rotate to look around
-            self.bb.set("plan_action", "TURN_LEFT")
+            # Rotate to look around (RIGHT first as requested)
+            self.bb.set("plan_action", "TURN_RIGHT")
             self._debug_tick += 1
             return Status.RUNNING
         
