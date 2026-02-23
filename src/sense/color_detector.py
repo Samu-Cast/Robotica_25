@@ -21,10 +21,10 @@ class ColorDetector:
                 'upper': np.array([80, 255, 255]),
                 'draw_color': (0, 255, 0)
             },
-            'blue': {
-                'lower': np.array([100, 150, 0]),
-                'upper': np.array([140, 255, 255]),
-                'draw_color': (255, 0, 0)
+            'yellow': {
+                'lower': np.array([20, 100, 100]),
+                'upper': np.array([35, 255, 255]),
+                'draw_color': (0, 255, 255)
             },
             'red': {
                 'lower': np.array([0, 150, 50]),
