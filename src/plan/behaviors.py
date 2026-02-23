@@ -394,14 +394,11 @@ class AtTarget(py_trees.behaviour.Behaviour):
         dy = target['y'] - robot_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
         
-        # Get all 3 proximity sensor readings
-        d_left = self.bb.get("distance_left") or 999.0
+        # Get proximity sensor readings
         d_center = self.bb.get("distance_center") or 999.0
-        d_right = self.bb.get("distance_right") or 999.0
         
-        # Check if ANY sensor detects target close enough
-        min_distance = d_center   #🔴🔴🔴PRIMA🔴🔴🔴: min_distance = min(d_left, d_center, d_right)
-        target_close = min_distance <= self.PROXIMITY_THRESHOLD #questo mi deve dire se sono abbastanza vicino
+        # Check if robot is physically close to something (wall/target)
+        target_close = d_center <= self.PROXIMITY_THRESHOLD
         
         detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
@@ -411,62 +408,54 @@ class AtTarget(py_trees.behaviour.Behaviour):
         color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
         
         # ============================================================================
-        # TARGET REACHED: Color detected = target confirmed
+        # STEP 1: COLOR DETECTION & CENTERING
+        # When we see the right color, pause 1s then center and approach
         # ============================================================================
-        if color_matches_target and target_close: 
-            print(f"[PLAN] SONO VICINO AL TARGET: {target_name.upper()} | Color: {detected_color}")
-            
-            # Calculate and apply odometry correction (x/y only, no theta)
-            target_coords = KNOWN_TARGETS.get(target_name, {})
-            
-            new_correction = {
-                'dx': target_coords.get('x', 0.0) - robot_pos_raw.get('x', 0.0),
-                'dy': target_coords.get('y', 0.0) - robot_pos_raw.get('y', 0.0),
-                'dtheta': 0.0  # No theta correction
-            }
-            
-            self.bb.set("odom_correction", new_correction)
-            
-            print(f"[ODOM] CORRECTION APPLIED at {target_name.upper()}:")
-            print(f"[ODOM]   Raw pos: ({robot_pos_raw.get('x', 0):.2f}, {robot_pos_raw.get('y', 0):.2f})")
-            print(f"[ODOM]   Known:   ({target_coords.get('x', 0):.2f}, {target_coords.get('y', 0):.2f})")
-            print(f"[ODOM]   Offset:  (dx={new_correction['dx']:.2f}, dy={new_correction['dy']:.2f})")
-            
-            # Check if valve
-            if detected_color == "red":
-                self.bb.set("found", "valve")
-                print(f"[PLAN] VALVE FOUND!")
-            
-            # Mark target as visited
-            visited = self.bb.get("visited_targets") or []
-            if target_name not in visited:
-                visited.append(target_name)
-                self.bb.set("visited_targets", visited)
-
-            self.bb.set("plan_action", "STOP")
-            
-            # Reset state for next target
-            self.bb.set("current_target", None)
-            self._color_detected_logged = False
-            self._centering_complete = False
-            
-            return Status.SUCCESS
-
-        # ============================================================================
-        # COLOR DETECTION & CENTERING (< 1 meter, correct color only)
-        # ============================================================================
-        if color_matches_target and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
-            # Log once when color first detected + pause 1 second
+        if color_matches_target:
+            # First time seeing the color — pause 1 second
             if not self._color_detected_logged:
                 print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
-                self._color_detected_logged = True 
+                self._color_detected_logged = True
                 self._centering_complete = False
                 self.bb.set("plan_action", "STOP")
                 print(f"[PLAN] PAUSING 1s before centering...")
                 time.sleep(1.0)
                 return Status.RUNNING
             
-            # Center color in camera frame
+            # ============================================================================
+            # STEP 2: TARGET REACHED — color matches AND proximity confirms close
+            # ============================================================================
+            if target_close:
+                print(f"[PLAN] TARGET REACHED: {target_name.upper()} | Color: {detected_color} | Proximity: {d_center:.2f}m")
+                
+                # Apply odometry correction
+                target_coords = KNOWN_TARGETS.get(target_name, {})
+                new_correction = {
+                    'dx': target_coords.get('x', 0.0) - robot_pos_raw.get('x', 0.0),
+                    'dy': target_coords.get('y', 0.0) - robot_pos_raw.get('y', 0.0),
+                    'dtheta': 0.0
+                }
+                self.bb.set("odom_correction", new_correction)
+                print(f"[ODOM] CORRECTION @ {target_name.upper()}: dx={new_correction['dx']:.2f}, dy={new_correction['dy']:.2f}")
+                
+                # Check if valve (red)
+                if detected_color.lower() == "red":
+                    self.bb.set("found", "valve")
+                    print(f"[PLAN] VALVE FOUND!")
+                
+                # Mark target as visited
+                visited = self.bb.get("visited_targets") or []
+                if target_name not in visited:
+                    visited.append(target_name)
+                    self.bb.set("visited_targets", visited)
+                
+                self.bb.set("plan_action", "STOP")
+                self.bb.set("current_target", None)
+                self._color_detected_logged = False
+                self._centering_complete = False
+                return Status.SUCCESS
+            
+            # Not close enough yet — center the color and advance
             if detection_zone and detection_zone != 'center':
                 if detection_zone == 'left':
                     self.bb.set("plan_action", "MOVE_FRONT_LEFT")
@@ -475,20 +464,16 @@ class AtTarget(py_trees.behaviour.Behaviour):
                 self._centering_complete = False
                 return Status.RUNNING
             else:
-                # Color is centered - advance straight
+                # Color is centered — go straight toward it
                 if not self._centering_complete:
                     print(f"[PLAN] COLOR CENTERED - advancing to {target_name.upper()}...")
                     self._centering_complete = True
-                
                 self.bb.set("plan_action", "MOVE_FORWARD")
                 return Status.RUNNING
         
-        # Reset centering when color is lost or too far
-        if not color_matches_target or distance_to_target > self.COLOR_DETECTION_DISTANCE:
-            self._color_detected_logged = False
-            self._centering_complete = False
-        
-
+        # Color not detected — reset state
+        self._color_detected_logged = False
+        self._centering_complete = False
         
         # Not at target yet
         return Status.FAILURE
@@ -702,60 +687,47 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
                       d_left < SIDE_OBSTACLE_DIST or 
                       d_right < SIDE_OBSTACLE_DIST)
         
-        if is_blocked:
-            was_avoiding = self.avoiding
-            self.avoiding = True
-            self.recovery_steps = 0
-            
-            action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
-            
-            # Log on first detection or periodically
-            if not was_avoiding or self._debug_tick % 10 == 0:
-                blocked_sensors = []
-                if d_left < SIDE_OBSTACLE_DIST: blocked_sensors.append(f"L={d_left:.2f}<{SIDE_OBSTACLE_DIST}")
-                if d_center < FRONT_OBSTACLE_DIST: blocked_sensors.append(f"C={d_center:.2f}<{FRONT_OBSTACLE_DIST}")
-                if d_right < SIDE_OBSTACLE_DIST: blocked_sensors.append(f"R={d_right:.2f}<{SIDE_OBSTACLE_DIST}")
-                prefix = "[AVOID HUMAN]" if human_detected else "[AVOID]"
-                print(f"{prefix} ULTRASONIC: {' '.join(blocked_sensors)} -> {action}")
-            
-            self.last_action = action
-            self.bb.set("plan_action", action)
-            self._debug_tick += 1
-            return Status.RUNNING
-
-        #C. RECOVERY (Post-Avoidance) - Check if path to TARGET is clear, not just if obstacle is gone
-        if self.avoiding:
-            # Calculate angle to target
-            target_angle = math.atan2(dy, dx)
-            angle_diff = target_angle - robot_theta
-            while angle_diff > math.pi:
-                angle_diff -= 2 * math.pi
-            while angle_diff < -math.pi:
-                angle_diff += 2 * math.pi
-            
-            # Determine which sensor is relevant for the target direction
-            # If target is ahead (|angle| < 45°), check front sensor
-            # If target is left (angle > 45°), check left sensor  
-            # If target is right (angle < -45°), check right sensor
-            CLEAR_THRESHOLD = FRONT_OBSTACLE_DIST  # Resume as soon as path is clear
-            
-            if abs(angle_diff) < 0.8:  # ~45° - target is roughly ahead
-                path_clear = d_center > CLEAR_THRESHOLD
-            elif angle_diff > 0:  # target is to the left
-                path_clear = d_center > CLEAR_THRESHOLD
-            else:  # target is to the right
-                path_clear = d_center > CLEAR_THRESHOLD
-            
-            if path_clear:
-                # Path to target is clear - resume navigation immediately
-                self.avoiding = False
+        # Skip normal obstacle avoidance when in search mode (near target)
+        # Robot is expected to be close to walls when scanning for colored target
+        # Only emergency safety check (0.05m danger zone) remains active
+        if not in_search_mode:
+            if is_blocked:
+                was_avoiding = self.avoiding
+                self.avoiding = True
                 self.recovery_steps = 0
-                print(f"[AVOID] PATH TO {target['name'].upper()} CLEAR - resuming navigation")
-            else:
-                # Path still blocked - continue avoidance
+                
                 action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
+                
+                # Log on first detection or periodically
+                if not was_avoiding or self._debug_tick % 10 == 0:
+                    blocked_sensors = []
+                    if d_left < SIDE_OBSTACLE_DIST: blocked_sensors.append(f"L={d_left:.2f}<{SIDE_OBSTACLE_DIST}")
+                    if d_center < FRONT_OBSTACLE_DIST: blocked_sensors.append(f"C={d_center:.2f}<{FRONT_OBSTACLE_DIST}")
+                    if d_right < SIDE_OBSTACLE_DIST: blocked_sensors.append(f"R={d_right:.2f}<{SIDE_OBSTACLE_DIST}")
+                    prefix = "[AVOID HUMAN]" if human_detected else "[AVOID]"
+                    print(f"{prefix} ULTRASONIC: {' '.join(blocked_sensors)} -> {action}")
+                
+                self.last_action = action
                 self.bb.set("plan_action", action)
+                self._debug_tick += 1
                 return Status.RUNNING
+
+            #C. RECOVERY (Post-Avoidance) - Check if path to TARGET is clear
+            if self.avoiding:
+                CLEAR_THRESHOLD = FRONT_OBSTACLE_DIST
+                path_clear = d_center > CLEAR_THRESHOLD
+                
+                if path_clear:
+                    self.avoiding = False
+                    self.recovery_steps = 0
+                    print(f"[AVOID] PATH TO {target['name'].upper()} CLEAR - resuming navigation")
+                else:
+                    action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
+                    self.bb.set("plan_action", action)
+                    return Status.RUNNING
+        else:
+            # In search mode - reset avoidance state
+            self.avoiding = False
         
         # ============================================================================
         # VISUAL SEARCH: When close to target but color not detected, rotate to scan
