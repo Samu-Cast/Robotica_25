@@ -467,14 +467,8 @@ class AtTarget(py_trees.behaviour.Behaviour):
             
             # --- Phase CENTERING: orient to center the color ---
             if self._arrival_phase == "CENTERING":
-                if color_matches_target and detection_zone and detection_zone != 'center':
-                    if detection_zone == 'left':
-                        self.bb.set("plan_action", "TURN_LEFT")
-                    else:
-                        self.bb.set("plan_action", "TURN_RIGHT")
-                    return Status.RUNNING
-                else:
-                    # Centered (or color lost — proceed anyway)
+                if color_matches_target and detection_zone == 'center':
+                    # Color is centered! Proceed to pause + sound
                     print(f"[PLAN] TARGET CENTERED: {target_name.upper()} - stopping for 1s...")
                     self.bb.set("plan_action", "STOP")
                     self._arrival_phase = "PAUSING"
@@ -482,6 +476,16 @@ class AtTarget(py_trees.behaviour.Behaviour):
                     # Play sound (skip for red/valve — CelebrateMission has its own melody)
                     if not (detected_color and detected_color.lower() == 'red'):
                         self._play_target_reached_sound()
+                    return Status.RUNNING
+                elif color_matches_target and detection_zone == 'left':
+                    self.bb.set("plan_action", "TURN_LEFT")
+                    return Status.RUNNING
+                elif color_matches_target and detection_zone == 'right':
+                    self.bb.set("plan_action", "TURN_RIGHT")
+                    return Status.RUNNING
+                else:
+                    # Color lost or zone unknown — keep turning slowly to find it
+                    self.bb.set("plan_action", "TURN_LEFT")
                     return Status.RUNNING
             
             # --- Phase PAUSING: stay still for 2 seconds ---
