@@ -350,7 +350,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
            - Mark target as visited, proceed to next target
     """
     COLOR_DETECTION_DISTANCE = 1.0  # Distance threshold for color detection (meters)
-    PROXIMITY_THRESHOLD = 0.08  # Distance to consider target reached (between 0.05 danger and 0.12 medium)
+    PROXIMITY_THRESHOLD = 0.05  # 🔴🔴🔴PRIMA🔴🔴🔴 0.08 Distance to consider target reached (between 0.05 danger and 0.12 medium)
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -400,8 +400,8 @@ class AtTarget(py_trees.behaviour.Behaviour):
         d_right = self.bb.get("distance_right") or 999.0
         
         # Check if ANY sensor detects target close enough
-        min_distance = min(d_left, d_center, d_right)
-        target_close = min_distance < self.PROXIMITY_THRESHOLD
+        min_distance = d_center   #🔴🔴🔴PRIMA🔴🔴🔴: min_distance = min(d_left, d_center, d_right)
+        target_close = min_distance <= self.PROXIMITY_THRESHOLD #questo mi deve dire se sono abbastanza vicino
         
         detected_color = self.bb.get("detected_color")
         target_name = target.get("name")
@@ -413,8 +413,8 @@ class AtTarget(py_trees.behaviour.Behaviour):
         # ============================================================================
         # TARGET REACHED: Color detected = target confirmed
         # ============================================================================
-        if color_matches_target:
-            print(f"[PLAN] TARGET CONFIRMED: {target_name.upper()} | Color: {detected_color}")
+        if color_matches_target and target_close: 
+            print(f"[PLAN] SONO VICINO AL TARGET: {target_name.upper()} | Color: {detected_color}")
             
             # Calculate and apply odometry correction (x/y only, no theta)
             target_coords = KNOWN_TARGETS.get(target_name, {})
@@ -451,7 +451,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
             self._centering_complete = False
             
             return Status.SUCCESS
-            
+
         # ============================================================================
         # COLOR DETECTION & CENTERING (< 1 meter, correct color only)
         # ============================================================================
