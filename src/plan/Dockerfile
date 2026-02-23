@@ -34,7 +34,9 @@ RUN printf '%s\n' \
     "std_msgs/Header header" \
     "irobot_create_msgs/AudioNote[] notes" \
     "bool append" \
-    > /home/ubuntu/irobot_ws/src/irobot_create_msgs/msg/AudioNoteVector.msg
+    > /home/ubuntu/irobot_ws/src/irobot_create_msgs/msg/AudioNoteVector.msg && \
+    sed -i '/"msg\/WheelVels.msg"/a\  "msg/AudioNote.msg"\n  "msg/AudioNoteVector.msg"' \
+    /home/ubuntu/irobot_ws/src/irobot_create_msgs/CMakeLists.txt
 
 WORKDIR /home/ubuntu/irobot_ws
 RUN . /opt/ros/foxy/setup.sh && \
