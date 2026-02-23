@@ -671,6 +671,10 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         
         #LOGIC START
         
+        # Check if we're near the target (search mode) - skip obstacle avoidance
+        # Robot is expected to be close to walls when searching for colored target
+        in_search_mode = (distance_to_target < self.SEARCH_DISTANCE)
+        
         # OBSTACLE AVOIDANCE - Check if human detected for larger safety margin
         found = self.bb.get("found")
         human_detected = (found == "person")
