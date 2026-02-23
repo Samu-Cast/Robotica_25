@@ -17,7 +17,7 @@ class ColorDetector:
         # Color detection parameters (HSV ranges)
         self.target_colors = {
             'green': {
-                'lower': np.array([50, 50, 50]),
+                'lower': np.array([40, 50, 50]),
                 'upper': np.array([80, 255, 255]),
                 'draw_color': (0, 255, 0)
             },
