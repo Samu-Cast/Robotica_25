@@ -29,6 +29,8 @@ class ColorDetector:
             'red': {
                 'lower': np.array([0, 150, 50]),
                 'upper': np.array([10, 255, 255]),
+                'lower2': np.array([160, 150, 50]),
+                'upper2': np.array([180, 255, 255]),
                 'draw_color': (0, 0, 255)
             }
         }
@@ -71,6 +73,11 @@ class ColorDetector:
             for color_name, params in self.target_colors.items():
                 # Create mask for this color
                 mask = cv2.inRange(hsv, params['lower'], params['upper'])
+                
+                # If second range exists (e.g. red wraps around in HSV), combine masks
+                if 'lower2' in params:
+                    mask2 = cv2.inRange(hsv, params['lower2'], params['upper2'])
+                    mask = cv2.bitwise_or(mask, mask2)
                 
                 # Clean up mask
                 kernel = np.ones((5, 5), np.uint8)
