@@ -612,9 +612,8 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         #Write access
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self.bb.register_key("goal_pose", access=py_trees.common.Access.WRITE)
-        
-        #Read access
-        self.bb.register_key("current_target", access=py_trees.common.Access.READ)
+        self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
         self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
