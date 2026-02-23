@@ -716,15 +716,20 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
                 self._debug_tick += 1
                 return Status.RUNNING
 
-            #C. RECOVERY (Post-Avoidance) - Check if path to TARGET is clear
+            #C. RECOVERY (Post-Avoidance) - Keep turning until center + turning side are clear
             if self.avoiding:
-                CLEAR_THRESHOLD = FRONT_OBSTACLE_DIST
-                path_clear = d_center > CLEAR_THRESHOLD
+                # Check center + the side we're turning toward
+                if self.last_action == 'TURN_RIGHT':
+                    side_clear = d_right > SIDE_OBSTACLE_DIST
+                else:
+                    side_clear = d_left > SIDE_OBSTACLE_DIST
+                
+                path_clear = (d_center > FRONT_OBSTACLE_DIST and side_clear)
                 
                 if path_clear:
                     self.avoiding = False
                     self.recovery_steps = 0
-                    print(f"[AVOID] PATH TO {target['name'].upper()} CLEAR - resuming navigation")
+                    print(f"[AVOID] ALL CLEAR - resuming navigation to {target['name'].upper()}")
                 else:
                     action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
                     self.bb.set("plan_action", action)
