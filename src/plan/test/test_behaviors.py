@@ -15,7 +15,7 @@ from behaviors import (
     BatteryCheck, GoCharge, CalculateTarget, AtTarget, MoveToTarget,
     SearchObj, RecognitionPerson, RecognitionObstacle, RecognitionValve,
     SignalPerson, GoAroundP, GoAroundO, ActiveValve, InitialRetreat,
-    GoToHuman, build_tree, KNOWN_TARGETS,
+    CelebrateMission, build_tree, KNOWN_TARGETS,
     #Helper functions - funzioni pure senza side effects
     calculate_best_direction, calculate_closest_target, 
     calculate_direction_to_target, check_wall_alignment
@@ -353,20 +353,12 @@ class TestBehaviors:
         assert self.bb.get("plan_action") == "MOVE_BACKWARD"
     
     
-    def test_go_to_human_no_position(self):
-        """GoToHuman: FAILURE se posizione umano non salvata"""
-        self.bb.set("human_position", None)
-        b = GoToHuman()
-        b.setup_with_descendants()
-        assert b.update() == Status.FAILURE
-    
-    def test_go_to_human_retreat(self):
-        """GoToHuman: prima fase è retreat (allontanarsi dal muro)"""
-        self.bb.set("human_position", {'x': 5, 'y': 5, 'theta': 0})
-        b = GoToHuman()
+    def test_celebrate_mission_starts_spinning(self):
+        """CelebrateMission: RUNNING e inizia a girare su se stesso"""
+        b = CelebrateMission()
         b.setup_with_descendants()
         assert b.update() == Status.RUNNING
-        assert self.bb.get("plan_action") == "MOVE_BACKWARD"
+        assert self.bb.get("plan_action") == "TURN_LEFT"
     
     #Integration
     def test_build_tree(self):
