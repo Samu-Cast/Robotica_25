@@ -24,6 +24,18 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /home/ubuntu/irobot_ws/src
 RUN git clone -b foxy \
     https://github.com/iRobotEducation/irobot_create_msgs.git
+
+# Aggiungi i .msg audio mancanti nel branch foxy (esistono da galactic in poi)
+RUN printf '%s\n' \
+    "uint16 frequency" \
+    "builtin_interfaces/Duration max_runtime" \
+    > /home/ubuntu/irobot_ws/src/irobot_create_msgs/msg/AudioNote.msg && \
+    printf '%s\n' \
+    "std_msgs/Header header" \
+    "irobot_create_msgs/AudioNote[] notes" \
+    "bool append" \
+    > /home/ubuntu/irobot_ws/src/irobot_create_msgs/msg/AudioNoteVector.msg
+
 WORKDIR /home/ubuntu/irobot_ws
 RUN . /opt/ros/foxy/setup.sh && \
     colcon build --symlink-install --packages-select irobot_create_msgs
