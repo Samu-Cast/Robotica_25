@@ -591,16 +591,14 @@ class AtTarget(py_trees.behaviour.Behaviour):
 
 class InitialRetreat(py_trees.behaviour.Behaviour):
     """
-    Startup sequence with 2 phases:
-    1. RETREAT: Move backward 0.5m to get away from base station
-    2. ROTATE: Turn left 180° to face the room
+    Startup sequence:
+    1. RETREAT: Move backward 0.2m to get away from base station
     
-    Odometry is reset ONLY at startup (by plan_node via /reset_pose service),
-    NOT after the rotation — re-zeroing after the 180° turn caused drift issues.
+    No rotation needed — CalculateTarget handles initial orientation.
+    Odometry is reset at startup (by plan_node via /reset_pose service).
     Home/base station position is saved by plan_node BEFORE this runs.
     """
     RETREAT_DISTANCE = 0.2  # meters to retreat
-    ROTATE_ANGLE = math.pi  # 180 degrees
     
     def __init__(self):
         super().__init__(name="InitialRetreat")
@@ -610,11 +608,7 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         self.bb.register_key("startup_complete", access=py_trees.common.Access.READ)
         self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
         
-        self._phase = "RETREAT"  # RETREAT -> ROTATE -> done
         self._start_position = None
-        self._rotate_start_theta = None
-        self._total_rotated = 0.0
-        self._last_theta = None
     
     def update(self):
         if self.bb.get("startup_complete"):
@@ -622,59 +616,25 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
         
         robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         
-        # ===== PHASE 1: RETREAT =====
-        if self._phase == "RETREAT":
-            if self._start_position is None:
-                self._start_position = robot_pos.copy()
-                print(f"[STARTUP] Phase 1: RETREAT ({self.RETREAT_DISTANCE}m backward)...")
-            
-            dx = robot_pos['x'] - self._start_position['x']
-            dy = robot_pos['y'] - self._start_position['y']
-            distance = math.sqrt(dx**2 + dy**2)
-            
-            if distance < self.RETREAT_DISTANCE:
-                self.bb.set("plan_action", "MOVE_BACKWARD")
-                return Status.RUNNING
-            else:
-                print(f"[STARTUP] Phase 1 DONE: retreated {distance:.2f}m")
-                self._phase = "ROTATE"
-                self._rotate_start_theta = robot_pos['theta']
-                self._last_theta = robot_pos['theta']
-                self._total_rotated = 0.0
-                self.bb.set("plan_action", "STOP")
-                return Status.RUNNING
+        # Record start position on first tick
+        if self._start_position is None:
+            self._start_position = robot_pos.copy()
+            print(f"[STARTUP] RETREAT ({self.RETREAT_DISTANCE}m backward)...")
         
-        # ===== PHASE 2: ROTATE 180° =====
-        if self._phase == "ROTATE":
-            if self._rotate_start_theta is None:
-                self._rotate_start_theta = robot_pos['theta']
-                self._last_theta = robot_pos['theta']
-                print(f"[STARTUP] Phase 2: ROTATE 180°...")
-            
-            # Track incremental rotation (handles wrap-around)
-            current_theta = robot_pos['theta']
-            delta = current_theta - self._last_theta
-            
-            # Normalize delta to [-pi, pi] for wrap-around
-            while delta > math.pi:
-                delta -= 2 * math.pi
-            while delta < -math.pi:
-                delta += 2 * math.pi
-            
-            self._total_rotated += abs(delta)
-            self._last_theta = current_theta
-            
-            if self._total_rotated < self.ROTATE_ANGLE:
-                self.bb.set("plan_action", "TURN_LEFT")
-                return Status.RUNNING
-            else:
-                print(f"[STARTUP] Phase 2 DONE: rotated {math.degrees(self._total_rotated):.0f}°")
-                # Startup complete — no origin reset, odometry was already zeroed at startup
-                self.bb.set("startup_complete", True)
-                self.bb.set("plan_action", "STOP")
-                print(f"[STARTUP] COMPLETE - Navigation started! (odometry zeroed at boot)")
-                return Status.SUCCESS
+        dx = robot_pos['x'] - self._start_position['x']
+        dy = robot_pos['y'] - self._start_position['y']
+        distance = math.sqrt(dx**2 + dy**2)
         
+        if distance < self.RETREAT_DISTANCE:
+            self.bb.set("plan_action", "MOVE_BACKWARD")
+            return Status.RUNNING
+        else:
+            print(f"[STARTUP] RETREAT DONE: {distance:.2f}m")
+            self.bb.set("startup_complete", True)
+            self.bb.set("plan_action", "STOP")
+            print(f"[STARTUP] COMPLETE - CalculateTarget will handle orientation")
+            return Status.SUCCESS
+    
         return Status.RUNNING
 
 
@@ -1176,68 +1136,77 @@ class ActiveValve(py_trees.behaviour.Behaviour):
 class CelebrateMission(py_trees.behaviour.Behaviour):
     """
         Celebration behavior after valve activation.
-        The robot spins in place for a set duration to celebrate,
-        and attempts to emit a beep sound.
-        Replaces GoToHuman since human detection is not available.
+        The robot stops and plays a victory melody via /cmd_audio.
+        No spinning — just music and a pause.
     """
-    SPIN_DURATION = 10.0  # Seconds to spin in place
+    CELEBRATE_TICKS = 30  # 3 seconds at 10Hz (time for melody to play)
     
     def __init__(self):
         super().__init__(name="CelebrateMission")
         self.bb = self.attach_blackboard_client(name=self.name)
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("audio_pub", access=py_trees.common.Access.READ)
         
         # Internal state
-        self._spin_start = None
-        self._beep_played = False
+        self._melody_played = False
+        self._tick_counter = 0
     
     def update(self):
-        import subprocess
+        self.bb.set("plan_action", "STOP")
         
-        # First tick: start spinning and try to beep
-        if self._spin_start is None:
-            self._spin_start = time.time()
+        # First tick: play victory melody
+        if not self._melody_played:
+            self._melody_played = True
+            self._tick_counter = 0
             print(f"")
             print(f"[PLAN] =============================================")
-            print(f"[PLAN] CELEBRATION! Robot is spinning in place!")
+            print(f"[PLAN] MISSION COMPLETE! Playing victory melody!")
             print(f"[PLAN] =============================================")
             print(f"")
-        
-        # Try to emit a beep sound (once)
-        if not self._beep_played:
-            self._beep_played = True
-            try:
-                # Try system beep via aplay or beep command
-                subprocess.Popen(
-                    ["bash", "-c", "for i in 1 2 3; do echo -e '\\a'; sleep 0.3; done"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                print(f"[PLAN] BEEP! (attempting system sound)")
-            except Exception:
-                print(f"[PLAN] (no audio device available)")
-        
-        elapsed = time.time() - self._spin_start
-        
-        if elapsed < self.SPIN_DURATION:
-            # Keep spinning
-            self.bb.set("plan_action", "TURN_LEFT")
-            
-            # Log every 2 seconds
-            if int(elapsed) % 2 == 0 and (elapsed - int(elapsed)) < 0.15:
-                remaining = self.SPIN_DURATION - elapsed
-                print(f"[PLAN] SPINNING... {remaining:.0f}s remaining")
-            
+            self._play_victory_melody()
             return Status.RUNNING
-        else:
-            # Done spinning
-            self.bb.set("plan_action", "STOP")
-            print(f"")
-            print(f"[PLAN] =============================================")
-            print(f"[PLAN] CELEBRATION COMPLETE! Mission finished.")
-            print(f"[PLAN] =============================================")
-            print(f"")
-            return Status.SUCCESS
+        
+        # Wait for melody to finish
+        self._tick_counter += 1
+        if self._tick_counter < self.CELEBRATE_TICKS:
+            return Status.RUNNING
+        
+        # Done
+        print(f"")
+        print(f"[PLAN] =============================================")
+        print(f"[PLAN] CELEBRATION COMPLETE! Mission finished.")
+        print(f"[PLAN] =============================================")
+        print(f"")
+        return Status.SUCCESS
+
+    def _play_victory_melody(self):
+        """Play a triumphant victory fanfare via /cmd_audio."""
+        if not AUDIO_AVAILABLE:
+            print("[AUDIO] irobot_create_msgs not available, skipping melody")
+            return
+        
+        try:
+            audio_pub = self.bb.get("audio_pub")
+            if audio_pub is None:
+                print("[AUDIO] No audio publisher on blackboard")
+                return
+            
+            # Victory fanfare: C5-E5-G5-C6 (ascending), pause, G5-C6 (finale)
+            msg = AudioNoteVector()
+            msg.append = False
+            msg.notes = [
+                AudioNote(frequency=523, max_runtime=Duration(sec=0, nanosec=200000000)),  # C5
+                AudioNote(frequency=659, max_runtime=Duration(sec=0, nanosec=200000000)),  # E5
+                AudioNote(frequency=784, max_runtime=Duration(sec=0, nanosec=200000000)),  # G5
+                AudioNote(frequency=1047, max_runtime=Duration(sec=0, nanosec=400000000)), # C6
+                AudioNote(frequency=0,    max_runtime=Duration(sec=0, nanosec=200000000)), # pausa
+                AudioNote(frequency=784,  max_runtime=Duration(sec=0, nanosec=200000000)), # G5
+                AudioNote(frequency=1047, max_runtime=Duration(sec=0, nanosec=600000000)), # C6 lungo
+            ]
+            audio_pub.publish(msg)
+            print(f"[AUDIO] Victory melody played!")
+        except Exception as e:
+            print(f"[AUDIO] Error playing melody: {e}")
 
 
 #BEHAVIOR TREE CONSTRUCTION
