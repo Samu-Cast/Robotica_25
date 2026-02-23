@@ -56,7 +56,7 @@ class SenseNode(Node):
     # ir_intensity_right -> front_right
     IR_SENSOR_MAP = {
         'ir_intensity_front_center_left': 'front',
-        'ir_intensity_left': 'front_left',
+        'ir_intensity_side_left': 'front_left',
         'ir_intensity_right': 'front_right',
     }
 
