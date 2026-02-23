@@ -489,7 +489,7 @@ class InitialRetreat(py_trees.behaviour.Behaviour):
     NOT after the rotation — re-zeroing after the 180° turn caused drift issues.
     Home/base station position is saved by plan_node BEFORE this runs.
     """
-    RETREAT_DISTANCE = 0.5  # meters to retreat
+    RETREAT_DISTANCE = 0.2  # meters to retreat
     ROTATE_ANGLE = math.pi  # 180 degrees
     
     def __init__(self):
