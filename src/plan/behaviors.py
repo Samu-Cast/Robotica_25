@@ -287,6 +287,7 @@ class CalculateTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
         self._last_logged_target = None  #Evita spam di log
         self._current_aligned_target = None # Tracks if we have already done initial spin for this target
+        self._debug_tick = 0  # Contatore per logging periodico durante alignment
 
     def update(self):
         # 0. Get current state from blackboard
