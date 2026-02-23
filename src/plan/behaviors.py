@@ -350,7 +350,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
            - Mark target as visited, proceed to next target
     """
     COLOR_DETECTION_DISTANCE = 1.0  # Distance threshold for color detection (meters)
-    PROXIMITY_THRESHOLD = 0.05  # 🔴🔴🔴PRIMA🔴🔴🔴 0.08 Distance to consider target reached (between 0.05 danger and 0.12 medium)
+    PROXIMITY_THRESHOLD = 0.08  # 🔴🔴🔴PRIMA🔴🔴🔴 0.08 Distance to consider target reached (between 0.05 danger and 0.12 medium)
     
     def __init__(self):
         super().__init__(name="AtTarget")
