@@ -456,11 +456,15 @@ class AtTarget(py_trees.behaviour.Behaviour):
         # COLOR DETECTION & CENTERING (< 1 meter, correct color only)
         # ============================================================================
         if color_matches_target and distance_to_target <= self.COLOR_DETECTION_DISTANCE:
-            # Log once when color first detected
+            # Log once when color first detected + pause 1 second
             if not self._color_detected_logged:
                 print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
                 self._color_detected_logged = True 
                 self._centering_complete = False
+                self.bb.set("plan_action", "STOP")
+                print(f"[PLAN] PAUSING 1s before centering...")
+                time.sleep(1.0)
+                return Status.RUNNING
             
             # Center color in camera frame
             if detection_zone and detection_zone != 'center':
@@ -755,36 +759,38 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
                 return Status.RUNNING
         
         # ============================================================================
-        # VISUAL SEARCH: When close to target but color not detected, rotate to scan
+        # VISUAL SEARCH: When close to target but color not detected, stop & wait
+        # After ~1 second timeout, give up and recalculate next target
         # ============================================================================
+        SEARCH_TIMEOUT_TICKS = 10  # ~1 second at 10Hz
+        
         if distance_to_target < self.SEARCH_DISTANCE and not color_matches_target:
-            # Near target position but don't see the correct color - scan for it
+            # Near target position but don't see the correct color - stop
             if not self._search_logged:
-                print(f"[PLAN] SEARCH MODE: Near {target_name.upper()} (odom: {distance_to_target:.2f}m) - stopping 3s before scanning...")
+                print(f"[PLAN] SEARCH MODE: Near {target_name.upper()} (odom: {distance_to_target:.2f}m) - stopping to check color...")
                 self._search_logged = True
-                self.bb.set("plan_action", "STOP")
-                time.sleep(3.0)
-                print(f"[PLAN] SEARCH MODE: Now scanning for {target_name.upper()}...")
-            
-            # If we see the color but it's not centered, turn toward it
-            if color_matches_target and detection_zone:
-                if detection_zone == 'left':
-                    action = 'TURN_LEFT'
-                elif detection_zone == 'right':
-                    action = 'TURN_RIGHT'
-                else:
-                    action = 'MOVE_FORWARD'
                 self._search_ticks = 0
-            else:
-                # Don't see target color - rotate to scan
-                action = 'TURN_LEFT'
-                self._search_ticks += 1
-                
-                # Log periodically during search
-                if self._search_ticks % 20 == 0:
-                    print(f"[PLAN] SCANNING for {target_name.upper()}... (ticks: {self._search_ticks})")
             
-            self.bb.set("plan_action", action)
+            self._search_ticks += 1
+            
+            # Timeout: color not found after ~1 second → skip this target
+            if self._search_ticks >= SEARCH_TIMEOUT_TICKS:
+                print(f"[PLAN] SEARCH TIMEOUT: Color not found at {target_name.upper()} after {self._search_ticks} ticks - skipping to next target")
+                
+                # Mark target as visited so CalculateTarget picks the next one
+                visited = self.bb.get("visited_targets") or []
+                if target_name not in visited:
+                    visited.append(target_name)
+                    self.bb.set("visited_targets", visited)
+                
+                self.bb.set("current_target", None)
+                self.bb.set("plan_action", "STOP")
+                self._search_logged = False
+                self._search_ticks = 0
+                return Status.FAILURE  # Triggers CalculateTarget to pick next closest target
+            
+            # Still waiting - stop
+            self.bb.set("plan_action", "STOP")
             self._debug_tick += 1
             return Status.RUNNING
         else:
