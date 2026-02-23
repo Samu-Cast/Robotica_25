@@ -29,6 +29,7 @@ try:
     from sensor_msgs.msg import Range
     from geometry_msgs.msg import Pose2D, Pose
     from irobot_create_msgs.srv import ResetPose
+    from irobot_create_msgs.msg import AudioNoteVector, AudioNote
     ROS2_AVAILABLE = True
 except ImportError:
     ROS2_AVAILABLE = False
@@ -101,7 +102,7 @@ class PlanNode(Node):
             'detection_distance', 'detection_confidence',
             'distance_left', 'distance_center', 'distance_right',
             'robot_position', 'startup_complete', 'home_position', 'human_position',
-            'origin_offset'
+            'origin_offset', 'audio_pub'
         ]
         
         # Track if human position already saved (only save first detection)
@@ -138,6 +139,10 @@ class PlanNode(Node):
         self.cmd_pub = self.create_publisher(String, '/plan/command', 10)
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
         self.bt_status_pub = self.create_publisher(String, '/plan/bt_status', 10)  # BT visualization topic
+        
+        #Audio publisher for iCreate3 speaker
+        self.audio_pub = self.create_publisher(AudioNoteVector, '/cmd_audio', 10)
+        self.bb.set("audio_pub", self.audio_pub)  # Share with behavior nodes
         
         #Startup: wait 5 seconds then start BT (no /clock needed on physical robot)
         self._robot_ready = False

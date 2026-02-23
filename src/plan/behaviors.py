@@ -17,6 +17,14 @@ from py_trees import decorators
 from py_trees.composites import Sequence, Selector, Parallel
 from py_trees.common import Status, ParallelPolicy
 
+# iRobot Create3 audio messages (optional, for target-reached sound)
+try:
+    from builtin_interfaces.msg import Duration
+    from irobot_create_msgs.msg import AudioNoteVector, AudioNote
+    AUDIO_AVAILABLE = True
+except ImportError:
+    AUDIO_AVAILABLE = False
+
 
 ####################################################################################
 # KNOWN TARGETS CONFIGURATION
@@ -395,6 +403,7 @@ class AtTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
         self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+        self.bb.register_key("audio_pub", access=py_trees.common.Access.READ)
 
         # Internal state
         self._color_detected_logged = False 
@@ -482,6 +491,10 @@ class AtTarget(py_trees.behaviour.Behaviour):
                 self.bb.set("current_target", None)
                 self._color_detected_logged = False
                 self._centering_complete = False
+                
+                # Play celebratory sound on target reached
+                self._play_target_reached_sound()
+                
                 return Status.SUCCESS
             
             # Not close enough yet — center the color and advance
@@ -506,6 +519,31 @@ class AtTarget(py_trees.behaviour.Behaviour):
         
         # Not at target yet
         return Status.FAILURE
+
+    def _play_target_reached_sound(self):
+        """Publish a short celebratory melody to /cmd_audio when target is reached."""
+        if not AUDIO_AVAILABLE:
+            print("[AUDIO] irobot_create_msgs not available, skipping sound")
+            return
+        
+        try:
+            audio_pub = self.bb.get("audio_pub")
+            if audio_pub is None:
+                print("[AUDIO] No audio publisher on blackboard")
+                return
+            
+            # Create a 3-note ascending jingle (C5 → E5 → G5)
+            msg = AudioNoteVector()
+            msg.append = False  # Replace any currently playing audio
+            msg.notes = [
+                AudioNote(frequency=523, max_runtime=Duration(sec=0, nanosec=200000000)),  # C5 - 200ms
+                AudioNote(frequency=659, max_runtime=Duration(sec=0, nanosec=200000000)),  # E5 - 200ms
+                AudioNote(frequency=784, max_runtime=Duration(sec=0, nanosec=400000000)),  # G5 - 400ms
+            ]
+            audio_pub.publish(msg)
+            print(f"[AUDIO] Target reached sound played!")
+        except Exception as e:
+            print(f"[AUDIO] Error playing sound: {e}")
 
 
 class InitialRetreat(py_trees.behaviour.Behaviour):
