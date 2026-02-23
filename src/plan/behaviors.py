@@ -390,7 +390,8 @@ class AtTarget(py_trees.behaviour.Behaviour):
              Phase DONE: apply odom correction, mark visited, SUCCESS
     """
     PROXIMITY_THRESHOLD = 0.12 # Distance to consider target reached (0.12m)
-    PAUSE_TICKS = 20           # 2 seconds at 10Hz
+    PAUSE_TICKS = 10           # 1 second at 10Hz
+    COLOR_REACT_DISTANCE = 0.5 # Only react to color when within this odom distance (m)
     
     def __init__(self):
         super().__init__(name="AtTarget")
@@ -474,12 +475,13 @@ class AtTarget(py_trees.behaviour.Behaviour):
                     return Status.RUNNING
                 else:
                     # Centered (or color lost — proceed anyway)
-                    print(f"[PLAN] TARGET CENTERED: {target_name.upper()} - stopping for 2s...")
+                    print(f"[PLAN] TARGET CENTERED: {target_name.upper()} - stopping for 1s...")
                     self.bb.set("plan_action", "STOP")
                     self._arrival_phase = "PAUSING"
                     self._pause_counter = 0
-                    # Play sound at the start of the pause
-                    self._play_target_reached_sound()
+                    # Play sound (skip for red/valve — CelebrateMission has its own melody)
+                    if not (detected_color and detected_color.lower() == 'red'):
+                        self._play_target_reached_sound()
                     return Status.RUNNING
             
             # --- Phase PAUSING: stay still for 2 seconds ---
@@ -523,11 +525,14 @@ class AtTarget(py_trees.behaviour.Behaviour):
         
         # ============================================================================
         # APPROACH PHASE: color detection, centering, advancing
+        # Only react to color when odometry says we're close to the target
         # ============================================================================
-        if color_matches_target:
+        near_target_odom = distance_to_target < self.COLOR_REACT_DISTANCE
+        
+        if color_matches_target and near_target_odom:
             # First time seeing the color
             if not self._color_detected_logged:
-                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (dist: {distance_to_target:.2f}m)")
+                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (odom dist: {distance_to_target:.2f}m)")
                 self._color_detected_logged = True
                 self._centering_complete = False
                 self.bb.set("plan_action", "STOP")
