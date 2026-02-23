@@ -141,7 +141,7 @@ class PlanNode(Node):
         
         #Startup: wait 5 seconds then start BT (no /clock needed on physical robot)
         self._robot_ready = False
-        self._startup_timer = self.create_timer(30.0, self._start_behavior_tree)
+        self._startup_timer = self.create_timer(5.0, self._start_behavior_tree)
         
         self.get_logger().info('Waiting 5 seconds for sensors to stabilize...')
     

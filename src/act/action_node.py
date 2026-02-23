@@ -125,19 +125,19 @@ class ActNode(Node):
 
         #LEFT: rotazione continua finché PLAN non cambia
         elif self.state == ActState.LEFT:
-            self.send_cmd(0.0, +0.5)
+            self.send_cmd(0.0, +0.3)
         
         #RIGHT: rotazione continua finché PLAN non cambia
         elif self.state == ActState.RIGHT:
-            self.send_cmd(0.0, -0.5)
+            self.send_cmd(0.0, -0.3)
         
         # FRONT_LEFT: leggermente a sinistra (avanzando)
         elif self.state == ActState.FRONT_LEFT:
-            self.send_cmd(0.15, 0.25)
+            self.send_cmd(0.10, 0.30)
         
         # FRONT_RIGHT: leggermente a destra (avanzando)
         elif self.state == ActState.FRONT_RIGHT:
-            self.send_cmd(0.15, -0.25)
+            self.send_cmd(0.10, -0.30)
 
     '''
         # SEARCH_VALVE: rotazione continua con memoria 
