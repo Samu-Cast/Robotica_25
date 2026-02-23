@@ -682,7 +682,6 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
             'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
             'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
         }
-        print(f"MI TROVO ALL'INIZIO DI MOVETOTARGET, HO FATTO LA CORREZIONE ODOM")
         
         # Calculate distance to target (odometry-based)
         robot_x = robot_pos.get('x', 0.0)
@@ -790,7 +789,6 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         # ============================================================================
         if distance_to_target < self.SEARCH_DISTANCE and not color_matches_target:
 
-            print(f"[PLAN] STO CERCANDO IL COLORE")
             # Near target position but don't see the correct color - rotate to scan
             if not self._search_logged:
                 print(f"[PLAN] SEARCH MODE: Near {target_name.upper()} (odom: {distance_to_target:.2f}m) - scanning...")
