@@ -25,7 +25,4 @@ sudo apt update
 
 gh auth login
 
-
 #gh clone repo https://github.com/Samu-Cast/Robotica_25.git
-
-
