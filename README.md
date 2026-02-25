@@ -1,7 +1,5 @@
 # Charlie Robot - Autonomous Hazardous Environment Navigation
 
-![iRobot Create 3](documentation/robot_body.png)
-
 ## Descrizione del Progetto
 
 **Charlie** è un robot mobile autonomo progettato per operare in ambienti interni pericolosi colpiti da fuoriuscite accidentali di sostanze tossiche. Il progetto simula uno scenario in un laboratorio chimico dove una perdita di contaminante ha compromesso la qualità dell'aria e la visibilità, rendendo pericoloso l'intervento umano.
