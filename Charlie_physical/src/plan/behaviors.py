@@ -1,0 +1,1265 @@
+"""
+Charlie Robot - Behavior Tree Module
+Defines the behavior logic and tree construction for robot decision-making.
+"""
+
+import math
+import random
+import time
+
+import py_trees
+from py_trees import decorators
+from py_trees.composites import Sequence, Selector, Parallel
+from py_trees.common import Status, ParallelPolicy
+
+#iRobot Create3 audio messages (optional, for target-reached sound and celebration)
+try:
+    from builtin_interfaces.msg import Duration
+    from irobot_create_msgs.msg import AudioNoteVector, AudioNote
+    AUDIO_AVAILABLE = True
+except ImportError:
+    AUDIO_AVAILABLE = False
+
+
+# Known target locations
+KNOWN_TARGETS = {
+    'green': {'x': -2.0, 'y': 0.0, 'theta': 3.14},
+    'blue': {'x': -1.0, 'y': 1.0, 'theta': 1.57},
+    'red': {'x': -2.0, 'y': -1.0, 'theta': -1.57}, #Valve location
+}
+
+#HOME/SPAWN POSITION - Will be saved automatically when robot starts
+#This is just a fallback default if robot_position is not available at startup
+HOME_POSITION_DEFAULT = {
+    'x': 0.0,
+    'y': 0.0,
+    'theta': 0.0
+}
+
+
+#HELPER FUNCTIONS
+def calculate_best_direction(distance_left, distance_center, distance_right, threshold=0.12):
+    """
+    Calculate the optimal movement direction based on 3 distance sensors.
+    
+    IR sensor values (from sense_node 4-band conversion):
+        0.20m = far (no concern)
+        0.12m = medium (valid detection)
+        0.08m = medium-close (wall nearby)
+        0.05m = close (danger)
+    
+    Logic:
+    1. Safety: If ALL sensors <= 0.05m -> AVOID_OBSTACLE (Spin)
+    2. Frontal Obstacle: If Center <= threshold -> Turn to side with MORE space.
+    3. Center Clear:
+       - Wall Following: If side <= 0.08m -> Turn AWAY from wall.
+       - Else -> MOVE_FORWARD.
+    """
+    #1. Safety Panic Check (Too close to everything)
+    SAFETY_LIMIT = 0.05  # 5cm - danger zone from IR sensors
+    if distance_left <= SAFETY_LIMIT and distance_center <= SAFETY_LIMIT and distance_right <= SAFETY_LIMIT:
+        return 'AVOID_OBSTACLE'
+    
+    #2. Frontal Obstacle Check (Primary Trigger)
+    if distance_center <= threshold:
+        #Center is blocked - we MUST turn.
+        #Compare Left vs Right to find the best escape route.
+        if distance_left > distance_right:
+            return 'TURN_LEFT' #Left has more space
+        else:
+            return 'TURN_RIGHT' #Right has more space
+            
+    #3. Center is Clear - Wall Following / Side Safety
+    WALL_THRESHOLD = 0.08 #8cm - medium-close band = wall detected
+    
+    if distance_left <= WALL_THRESHOLD:
+        return 'TURN_RIGHT' #Too close to left wall -> Align right
+        
+    if distance_right <= WALL_THRESHOLD:
+        return 'TURN_LEFT' #Too close to right wall -> Align left
+        
+    #Safe to move forward (follow wall)
+    return 'MOVE_FORWARD'
+
+
+def calculate_closest_target(robot_pos, visited_targets):
+    """
+        Find the closest unvisited target from current position.
+    """
+    robot_x = robot_pos.get('x', 0.0)
+    robot_y = robot_pos.get('y', 0.0)
+    
+    closest = None
+    min_distance = float('inf')
+    
+    #Only consider unique positions
+    seen_positions = set()
+    
+    for target_name, target_data in KNOWN_TARGETS.items():
+        #Skip visited targets
+        if target_name in visited_targets:
+            continue
+        
+        #Skip duplicate positions 
+        pos_key = (target_data['x'], target_data['y'])
+        if pos_key in seen_positions:
+            continue
+        seen_positions.add(pos_key)
+        
+        #Calculate Euclidean distance
+        dx = target_data['x'] - robot_x
+        dy = target_data['y'] - robot_y
+        distance = math.sqrt(dx**2 + dy**2)
+        
+        if distance < min_distance:
+            min_distance = distance
+            closest = {
+                'name': target_name,
+                'x': target_data['x'],
+                'y': target_data['y'],
+                'theta': target_data['theta'],
+                'distance': distance
+            }
+    
+    return closest
+
+
+def calculate_direction_to_target(robot_pos, target):
+    """
+        Calculate the steering action required to reach a target.
+    """
+    robot_x = robot_pos.get('x', 0.0)
+    robot_y = robot_pos.get('y', 0.0)
+    robot_theta = robot_pos.get('theta', 0.0)
+    
+    target_x = target.get('x', 0.0)
+    target_y = target.get('y', 0.0)
+    
+    #Calculate angle to target
+    dx = target_x - robot_x
+    dy = target_y - robot_y
+    
+    target_angle = math.atan2(dy, dx)
+    
+    #Calculate angle difference (normalize to -π to π)
+    angle_diff = target_angle - robot_theta
+    while angle_diff > math.pi:
+        angle_diff -= 2 * math.pi
+    while angle_diff < -math.pi:
+        angle_diff += 2 * math.pi
+    
+    #Decide action based on angle difference
+    angle_threshold = 0.1 #~5 degrees
+    
+    if abs(angle_diff) < angle_threshold:
+        return 'MOVE_FORWARD'
+    elif angle_diff > 0:
+        return 'MOVE_FRONT_LEFT'
+    else:
+        return 'MOVE_FRONT_RIGHT'
+
+
+def check_wall_alignment(distance_left, distance_right, threshold=0.05):
+    """
+        Check if the robot is aligned perpendicularly with a wall.
+    """
+    if distance_left is None or distance_right is None:
+        return False
+    
+    diff = abs(distance_left - distance_right)
+    return diff <= threshold
+
+
+#BEHAVIOR TREE NODES
+
+#Battery Management
+class BatteryCheck(py_trees.behaviour.Behaviour):
+    """
+        Returns SUCCESS if battery > 20%, FAILURE otherwise.
+    """
+    def __init__(self):
+        super().__init__(name="BatteryCheck")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("battery", access=py_trees.common.Access.READ)
+    
+    def update(self):
+        battery = self.bb.get("battery")
+        return Status.SUCCESS if battery > 20 else Status.FAILURE
+
+
+class GoCharge(py_trees.behaviour.Behaviour):
+    """
+        Navigate to the charging station and recharge.
+    """
+    def __init__(self):
+        super().__init__(name="GoCharge")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        
+        #Write access for battery, action, and goal
+        self.bb.register_key("battery", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("goal_pose", access=py_trees.common.Access.WRITE)
+        
+        #Read access for distance sensors and home position
+        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+        self.bb.register_key("home_position", access=py_trees.common.Access.READ)
+    
+    def update(self):
+        battery = self.bb.get("battery")
+        
+        #Read distance sensors
+        distance_left = self.bb.get("distance_left") or 999.0
+        distance_center = self.bb.get("distance_center") or 999.0
+        distance_right = self.bb.get("distance_right") or 999.0
+        
+        #Set goal to charging station (spawn platform - saved at startup)
+        home_pos = self.bb.get("home_position") or HOME_POSITION_DEFAULT
+        goal_pose = {
+            'x': home_pos['x'],
+            'y': home_pos['y'],
+            'theta': home_pos['theta']
+        }
+        self.bb.set("goal_pose", goal_pose)
+        
+        print(f"[PLAN] BATTERY LOW - returning to charge station ({home_pos['x']:.2f}, {home_pos['y']:.2f})")
+        
+        #Calculate optimal direction based on 3 sensors
+        action = calculate_best_direction(distance_left, distance_center, distance_right)
+        self.bb.set("plan_action", action)
+        
+        #Simulate charging (random charge amount)
+        charge_amount = random.randint(30, 100 - int(battery))
+        new_battery = min(100, battery + charge_amount)
+        self.bb.set("battery", new_battery)
+        
+        #SUCCESS when fully charged (>= 80%), otherwise RUNNING
+        return Status.SUCCESS if new_battery >= 80 else Status.RUNNING
+
+
+#Target Navigation
+class CalculateTarget(py_trees.behaviour.Behaviour):
+    """
+        Select the next unvisited target from KNOWN_TARGETS.
+        Iterates through targets sequentially and selects first unvisited.
+        Returns FAILURE when all targets have been visited.
+    """
+    def __init__(self):
+        super().__init__(name="CalculateTarget")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
+        self.bb.register_key("detected_color", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self._last_logged_target = None #Evita spam di log
+        self._current_aligned_target = None #Tracks if we have already done initial spin for this target
+        self._debug_tick = 0 #Contatore per logging periodico durante alignment
+
+    def update(self):
+        #0. Get current state from blackboard
+        current = self.bb.get("current_target")
+        visited = self.bb.get("visited_targets") or []
+        robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+        
+        robot_pos = {
+            'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
+            'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
+            'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+        }
+
+        #1. Select NEW target if current is missing or already visited
+        if not current or current['name'] in visited:
+            closest_name = None
+            closest_dist = float('inf')
+            closest_data = None
+            
+            for name, data in KNOWN_TARGETS.items():
+                if name not in visited:
+                    dist = (data['x'] - robot_pos['x'])**2 + (data['y'] - robot_pos['y'])**2
+                    if dist < closest_dist:
+                        closest_dist = dist
+                        closest_name = name
+                        closest_data = data
+            
+            if closest_name:
+                self.bb.set("current_target", {
+                    'name': closest_name,
+                    'x': closest_data['x'],
+                    'y': closest_data['y'],
+                    'theta': closest_data['theta']
+                })
+                #Log only when target changes
+                if closest_name != self._last_logged_target:
+                    print(f"[PLAN] NEW TARGET: {closest_name.upper()} @ ({closest_data['x']:.2f}, {closest_data['y']:.2f}) | Dist: {math.sqrt(closest_dist):.2f}m")
+                    self._last_logged_target = closest_name
+                current = self.bb.get("current_target") #Update local reference
+        
+        
+        #3. ALIGNMENT PHASE: Spin in place to face the target before moving
+        #This only happens at the START of a new target acquisition
+        current = self.bb.get("current_target")
+        if current and self._current_aligned_target != current['name']:
+            #Calculate angle to target
+            target_x = current.get('x', 0.0)
+            target_y = current.get('y', 0.0)
+            dx = target_x - robot_pos['x']
+            dy = target_y - robot_pos['y']
+            target_angle = math.atan2(dy, dx)
+            
+            angle_diff = target_angle - robot_pos['theta']
+            while angle_diff > math.pi: angle_diff -= 2 * math.pi
+            while angle_diff < -math.pi: angle_diff += 2 * math.pi
+            
+            ALIGN_THRESHOLD = 0.3 #~17 degrees for initial spin
+            
+            if abs(angle_diff) > ALIGN_THRESHOLD:
+                #Still need to align
+                action = 'TURN_LEFT' if angle_diff > 0 else 'TURN_RIGHT'
+                self.bb.set("plan_action", action)
+                if self._debug_tick % 20 == 0:
+                    print(f"[PLAN] INITIAL ALIGNMENT to {current['name'].upper()}: diff={math.degrees(angle_diff):.0f}deg")
+                self._debug_tick += 1
+                return Status.RUNNING
+            else:
+                #Aligned! Continue to success
+                print(f"[PLAN] ALIGNED with {current['name'].upper()} - starting navigation flow")
+                self._current_aligned_target = current['name']
+                self.bb.set("plan_action", "STOP")
+                #return Status.SUCCESS
+
+        #All targets visited?
+        return Status.SUCCESS if current else Status.FAILURE
+
+
+class AtTarget(py_trees.behaviour.Behaviour):
+    """
+        Check if robot has arrived at the target.
+        
+        Complete Flow:
+        1. Color Detection: Center the color in camera
+           - If left/right: turn until centered
+           - Once centered: advance forward
+        2. Proximity Detection (front sensor < threshold):
+           - Enter ARRIVAL sequence:
+             Phase CENTERING: adjust orientation to center the color
+             Phase PAUSING: stop 2s + play sound
+             Phase DONE: apply odom correction, mark visited, SUCCESS
+    """
+    PROXIMITY_THRESHOLD = 0.12 #Distance to consider target reached (0.12m)
+    PAUSE_TICKS = 10 #1 second at 10Hz
+    COLOR_REACT_DISTANCE = 0.5 #Only react to color when within this odom distance (m)
+    
+    def __init__(self):
+        super().__init__(name="AtTarget")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
+        self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("found", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+        self.bb.register_key("audio_pub", access=py_trees.common.Access.READ)
+
+        #Internal state
+        self._color_detected_logged = False 
+        self._centering_complete = False
+        #Arrival sequence state
+        self._arrival_phase = None #None, "CENTERING", "PAUSING", "DONE"
+        self._pause_counter = 0
+
+    def _reset_state(self):
+        """Reset all internal state for next target."""
+        self._color_detected_logged = False
+        self._centering_complete = False
+        self._arrival_phase = None
+        self._pause_counter = 0
+
+    def update(self):
+        target = self.bb.get("current_target")
+        if not target:
+            return Status.FAILURE
+        
+        #Get robot position with odometry correction
+        robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+        
+        robot_pos = {
+            'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
+            'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
+            'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+        }
+        
+        robot_x = robot_pos.get('x', 0.0)
+        robot_y = robot_pos.get('y', 0.0)
+        
+        #Calculate distance to target
+        dx = target['x'] - robot_x
+        dy = target['y'] - robot_y
+        distance_to_target = math.sqrt(dx**2 + dy**2)
+        
+        #Get proximity sensor readings
+        d_center = self.bb.get("distance_center") or 999.0
+        
+        #Check if robot is physically close to something (wall/target)
+        target_close = d_center <= self.PROXIMITY_THRESHOLD
+        
+        detected_color = self.bb.get("detected_color")
+        target_name = target.get("name")
+        detection_zone = self.bb.get("detection_zone")
+        
+        #Check if detected color matches the current target
+        color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
+        
+        #ARRIVAL SEQUENCE (once target_close triggered with matching color)
+        #Phase: CENTERING → PAUSING (1s + sound) → DONE (mark visited)
+        if self._arrival_phase is not None:
+            
+            #Phase CENTERING: orient to center the color
+            if self._arrival_phase == "CENTERING":
+                if color_matches_target and detection_zone == 'center':
+                    #Color is centered! Proceed to pause + sound
+                    print(f"[PLAN] TARGET CENTERED: {target_name.upper()} - stopping for 1s...")
+                    self.bb.set("plan_action", "STOP")
+                    self._arrival_phase = "PAUSING"
+                    self._pause_counter = 0
+                    #Play sound (skip for red/valve — CelebrateMission has its own melody)
+                    if not (detected_color and detected_color.lower() == 'red'):
+                        self._play_target_reached_sound()
+                    return Status.RUNNING
+                elif color_matches_target and detection_zone == 'left':
+                    self.bb.set("plan_action", "TURN_LEFT")
+                    return Status.RUNNING
+                elif color_matches_target and detection_zone == 'right':
+                    self.bb.set("plan_action", "TURN_RIGHT")
+                    return Status.RUNNING
+                else:
+                    #Color lost or zone unknown — keep turning slowly to find it
+                    self.bb.set("plan_action", "TURN_LEFT")
+                    return Status.RUNNING
+            
+            #Phase PAUSING: stay still for 1 second
+            if self._arrival_phase == "PAUSING":
+                self.bb.set("plan_action", "STOP")
+                self._pause_counter += 1
+                if self._pause_counter >= self.PAUSE_TICKS:
+                    print(f"[PLAN] PAUSE COMPLETE - finalizing {target_name.upper()}")
+                    self._arrival_phase = "DONE"
+                return Status.RUNNING
+            
+            #Phase DONE: apply correction, mark visited, return SUCCESS
+            if self._arrival_phase == "DONE":
+                print(f"[PLAN] TARGET REACHED: {target_name.upper()} | Color: {detected_color} | Proximity: {d_center:.2f}m")
+                
+                #Apply odometry correction
+                target_coords = KNOWN_TARGETS.get(target_name, {})
+                new_correction = {
+                    'dx': target_coords.get('x', 0.0) - robot_pos_raw.get('x', 0.0),
+                    'dy': target_coords.get('y', 0.0) - robot_pos_raw.get('y', 0.0),
+                    'dtheta': 0.0
+                }
+                self.bb.set("odom_correction", new_correction)
+                print(f"[ODOM] CORRECTION @ {target_name.upper()}: dx={new_correction['dx']:.2f}, dy={new_correction['dy']:.2f}")
+                
+                #Check if valve (red)
+                if detected_color and detected_color.lower() == "red":
+                    self.bb.set("found", "valve")
+                    print(f"[PLAN] VALVE FOUND!")
+                
+                #Mark target as visited
+                visited = self.bb.get("visited_targets") or []
+                if target_name not in visited:
+                    visited.append(target_name)
+                    self.bb.set("visited_targets", visited)
+                
+                self.bb.set("plan_action", "STOP")
+                self.bb.set("current_target", None)
+                self._reset_state()
+                return Status.SUCCESS
+        
+        #APPROACH PHASE: color detection, centering, advancing
+        #Only react to color when odometry says we're close to the target
+        near_target_odom = distance_to_target < self.COLOR_REACT_DISTANCE
+        
+        if color_matches_target and near_target_odom:
+            #First time seeing the color
+            if not self._color_detected_logged:
+                print(f"[PLAN] COLOR DETECTED: {detected_color.upper()} at {target_name.upper()} (odom dist: {distance_to_target:.2f}m)")
+                self._color_detected_logged = True
+                self._centering_complete = False
+                self.bb.set("plan_action", "STOP")
+                return Status.RUNNING
+            
+            #Proximity reached → start arrival sequence
+            if target_close:
+                print(f"[PLAN] ARRIVED at {target_name.upper()} - starting arrival sequence (center → pause → done)")
+                self._arrival_phase = "CENTERING"
+                self.bb.set("plan_action", "STOP")
+                return Status.RUNNING
+            
+            #Not close enough yet — center the color and advance
+            if detection_zone and detection_zone != 'center':
+                if detection_zone == 'left':
+                    self.bb.set("plan_action", "MOVE_FRONT_LEFT")
+                elif detection_zone == 'right':
+                    self.bb.set("plan_action", "MOVE_FRONT_RIGHT")
+                self._centering_complete = False
+                return Status.RUNNING
+            else:
+                #Color is centered — go straight toward it
+                if not self._centering_complete:
+                    print(f"[PLAN] COLOR CENTERED - advancing to {target_name.upper()}...")
+                    self._centering_complete = True
+                self.bb.set("plan_action", "MOVE_FORWARD")
+                return Status.RUNNING
+        
+        #Color not detected — reset state
+        self._color_detected_logged = False
+        self._centering_complete = False
+        
+        #Not at target yet
+        return Status.FAILURE
+
+    def _play_target_reached_sound(self):
+        """
+            Publish a short celebratory melody to /cmd_audio when target is reached.
+        """
+        if not AUDIO_AVAILABLE:
+            print("[AUDIO] irobot_create_msgs not available, skipping sound")
+            return
+        
+        try:
+            audio_pub = self.bb.get("audio_pub")
+            if audio_pub is None:
+                print("[AUDIO] No audio publisher on blackboard")
+                return
+            
+            #Create a 3-note ascending jingle (C5 → E5 → G5)
+            msg = AudioNoteVector()
+            msg.append = False #Replace any currently playing audio
+            msg.notes = [
+                AudioNote(frequency=523, max_runtime=Duration(sec=0, nanosec=200000000)), #C5 - 200ms
+                AudioNote(frequency=659, max_runtime=Duration(sec=0, nanosec=200000000)), #E5 - 200ms
+                AudioNote(frequency=784, max_runtime=Duration(sec=0, nanosec=400000000)), #G5 - 400ms
+            ]
+            audio_pub.publish(msg)
+            print(f"[AUDIO] Target reached sound played!")
+        except Exception as e:
+            print(f"[AUDIO] Error playing sound: {e}")
+
+
+class InitialRetreat(py_trees.behaviour.Behaviour):
+    """
+        Startup sequence:
+        1. RETREAT: Move backward 0.2m to get away from base station
+        
+        No rotation needed — CalculateTarget handles initial orientation.
+        Odometry is reset at startup (by plan_node via /reset_pose service).
+        Home/base station position is saved by plan_node BEFORE this runs.
+    """
+    RETREAT_DISTANCE = 0.2 #meters to retreat
+    
+    def __init__(self):
+        super().__init__(name="InitialRetreat")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("startup_complete", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("startup_complete", access=py_trees.common.Access.READ)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        
+        self._start_position = None
+    
+    def update(self):
+        if self.bb.get("startup_complete"):
+            return Status.SUCCESS
+        
+        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        
+        #Record start position on first tick
+        if self._start_position is None:
+            self._start_position = robot_pos.copy()
+            print(f"[STARTUP] RETREAT ({self.RETREAT_DISTANCE}m backward)...")
+        
+        dx = robot_pos['x'] - self._start_position['x']
+        dy = robot_pos['y'] - self._start_position['y']
+        distance = math.sqrt(dx**2 + dy**2)
+        
+        if distance < self.RETREAT_DISTANCE:
+            self.bb.set("plan_action", "MOVE_BACKWARD")
+            return Status.RUNNING
+        else:
+            print(f"[STARTUP] RETREAT DONE: {distance:.2f}m")
+            self.bb.set("startup_complete", True)
+            self.bb.set("plan_action", "STOP")
+            print(f"[STARTUP] COMPLETE - CalculateTarget will handle orientation")
+            return Status.SUCCESS
+    
+        return Status.RUNNING
+
+
+
+
+class MoveToTarget(py_trees.behaviour.Behaviour):
+    """
+        Navigate towards the target with obstacle avoidance.
+        Uses Hysteresis-based navigation to avoid oscillation.
+        
+        Logic Flow:
+        1. Obstacle Detection (Ultrasonic)
+        - If any sensor blocked: Turn away from obstacle.
+        - Use calculate_best_direction() for smart choice.
+        2. Recovery (Post-Avoidance)
+        - If was avoiding and now clear: Move Forward blindly (1-2s) to pass obstacle.
+        3. Visual Search (when near target position)
+        - If close to target position but color not seen: Rotate to scan.
+        4. Navigation (Target)
+        - If clear: Calculate angle error.
+        - Only change direction if error is large (> threshold).
+        - Maintain current direction otherwise (Hysteresis).
+    """
+    SEARCH_DISTANCE =  0.3 #Start visual search when within this distance (meters)
+    
+    def __init__(self):
+        super().__init__(name="MoveToTarget")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        
+        #Write access
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("goal_pose", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("visited_targets", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("current_target", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_center", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
+        self.bb.register_key("found", access=py_trees.common.Access.READ)
+        self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
+        self.bb.register_key("detection_distance", access=py_trees.common.Access.READ)
+        self.bb.register_key("detection_confidence", access=py_trees.common.Access.READ)
+        self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
+        
+        self.avoiding = False
+        self.recovery_steps = 0
+        self.last_action = "STOP"
+        self._debug_tick = 0 #Contatore per logging periodico
+        self._search_ticks = 0 #Count ticks while searching
+        self._search_logged = False
+
+    def initialise(self):
+        """Reset internal state when behavior starts (for a new target)"""
+        self.avoiding = False
+        self.recovery_steps = 0
+        self.last_action = "STOP"
+        self._search_ticks = 0
+        self._search_logged = False
+
+    def update(self):
+        target = self.bb.get("current_target")
+        if not target:
+            self.bb.set("plan_action", "STOP")
+            return Status.FAILURE
+
+        #Update Blackboard Goal (for logging/debug)
+        self.bb.set("goal_pose", target)
+
+        #Read Sensors & Pos
+        d_left = self.bb.get("distance_left") or 999.0
+        d_center = self.bb.get("distance_center") or 999.0
+        d_right = self.bb.get("distance_right") or 999.0
+        robot_pos_raw = self.bb.get("robot_position") or {'x': 0, 'y': 0, 'theta': 0}
+        
+        #Apply odometry correction if available
+        odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+        robot_pos = {
+            'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
+            'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
+            'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+        }
+        
+        #Calculate distance to target (odometry-based)
+        robot_x = robot_pos.get('x', 0.0)
+        robot_y = robot_pos.get('y', 0.0)
+        robot_theta = robot_pos.get('theta', 0.0)
+        dx = target['x'] - robot_x
+        dy = target['y'] - robot_y
+        distance_to_target = math.sqrt(dx**2 + dy**2)
+        
+        #Get detected color for visual guidance
+        detected_color = self.bb.get("detected_color")
+        target_name = target.get("name")
+        color_matches_target = (detected_color and detected_color.lower() == target_name.lower())
+        detection_zone = self.bb.get("detection_zone")
+        
+        #Thresholds (adapted for IR sensor 4-band values: 0.20, 0.12, 0.08, 0.05)
+        OBSTACLE_DIST = 0.12 #medium range from IR sensors
+        
+        #CHECK FOR CHARGE_COLOR MODE (Ignore obstacles, go straight to colored wall)
+        current_action = self.bb.get("plan_action")
+        if current_action == "CHARGE_COLOR":
+            self.bb.set("plan_action", "MOVE_FORWARD")
+            if self._debug_tick % 30 == 0:
+                print(f"[AVOID] CHARGE_COLOR active - ignoring obstacles, straight to {target['name'].upper()}")
+            self._debug_tick += 1
+            return Status.RUNNING
+        
+        #LOGIC START
+        
+        #Check if we're near the target (search mode) - skip obstacle avoidance
+        #Robot is expected to be close to walls when searching for colored target
+        in_search_mode = (distance_to_target < self.SEARCH_DISTANCE)
+        
+        #OBSTACLE AVOIDANCE
+        found = self.bb.get("found")
+        human_detected = (found == "person")
+        
+        #Thresholds for 4-band IR (0.20 far, 0.12 medium, 0.08 wall, 0.05 danger)
+        if human_detected:
+            FRONT_OBSTACLE_DIST = 0.20 #react at far range for humans
+            SIDE_OBSTACLE_DIST = 0.12 #medium range for humans
+        else:
+            FRONT_OBSTACLE_DIST = 0.12 #medium range = obstacle detected
+            SIDE_OBSTACLE_DIST = 0.08 #wall detected (medium-close band)
+        
+        is_blocked = (d_center < FRONT_OBSTACLE_DIST or 
+                      d_left < SIDE_OBSTACLE_DIST or 
+                      d_right < SIDE_OBSTACLE_DIST)
+        
+        #Skip normal obstacle avoidance when in search mode (near target)
+        #Robot is expected to be close to walls when searching for colored target
+        #Only emergency safety check (0.05m danger zone) remains active
+        if not in_search_mode:
+            if is_blocked:
+                was_avoiding = self.avoiding
+                self.avoiding = True
+                self.recovery_steps = 0
+                
+                action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
+                
+                #Log on first detection or periodically
+                if not was_avoiding or self._debug_tick % 10 == 0:
+                    blocked_sensors = []
+                    if d_left < SIDE_OBSTACLE_DIST: blocked_sensors.append(f"L={d_left:.2f}<{SIDE_OBSTACLE_DIST}")
+                    if d_center < FRONT_OBSTACLE_DIST: blocked_sensors.append(f"C={d_center:.2f}<{FRONT_OBSTACLE_DIST}")
+                    if d_right < SIDE_OBSTACLE_DIST: blocked_sensors.append(f"R={d_right:.2f}<{SIDE_OBSTACLE_DIST}")
+                    prefix = "[AVOID HUMAN]" if human_detected else "[AVOID]"
+                    print(f"{prefix} ULTRASONIC: {' '.join(blocked_sensors)} -> {action}")
+                
+                self.last_action = action
+                self.bb.set("plan_action", action)
+                self._debug_tick += 1
+                return Status.RUNNING
+
+            #C. RECOVERY (Post-Avoidance) - ensure we fully clear the obstacle
+            if self.avoiding:
+                path_clear = (d_center > FRONT_OBSTACLE_DIST and 
+                              d_left > SIDE_OBSTACLE_DIST and 
+                              d_right > SIDE_OBSTACLE_DIST)
+                
+                if path_clear:
+                    #Move forward for a few ticks to clear the obstacle corner
+                    PASS_TICKS = 5 #~0.5s at 10Hz
+                    if self.recovery_steps < PASS_TICKS:
+                        self.recovery_steps += 1
+                        self.bb.set("plan_action", "MOVE_FORWARD")
+                        if self.recovery_steps == 1:
+                            print(f"[AVOID] Path clear - PASSING obstacle ({PASS_TICKS} ticks)...")
+                        return Status.RUNNING
+                    else:
+                        self.avoiding = False
+                        self.recovery_steps = 0
+                        print(f"[AVOID] ALL CLEAR - resuming navigation to {target['name'].upper()}")
+                else:
+                    action = calculate_best_direction(d_left, d_center, d_right, FRONT_OBSTACLE_DIST)
+                    self.bb.set("plan_action", action)
+                    return Status.RUNNING
+        else:
+            #In search mode - reset avoidance state
+            self.avoiding = False
+        
+        #VISUAL SEARCH: When close to target but color not detected, rotate to scan
+        #When color found, pause 1 second before proceeding
+        if distance_to_target < self.SEARCH_DISTANCE and not color_matches_target:
+
+            #Near target position but don't see the correct color - rotate to scan
+            if not self._search_logged:
+                print(f"[PLAN] SEARCH MODE: Near {target_name.upper()} (odom: {distance_to_target:.2f}m) - scanning...")
+                self._search_logged = True
+                self._search_ticks = 0
+            
+            self._search_ticks += 1
+            
+            #Log periodically
+            if self._search_ticks % 20 == 0:
+                print(f"[PLAN] SCANNING for {target_name.upper()}... (ticks: {self._search_ticks})")
+            
+            #Rotate to look around (RIGHT first as requested)
+            self.bb.set("plan_action", "TURN_RIGHT")
+            self._debug_tick += 1
+            return Status.RUNNING
+        
+        elif distance_to_target < self.SEARCH_DISTANCE and color_matches_target:
+            #Found the color while searching! Pause 1 second
+            if self._search_logged:
+                print(f"[PLAN] COLOR FOUND: {target_name.upper()} detected! Pausing 1s...")
+                self.bb.set("plan_action", "STOP")
+                time.sleep(1.0)
+                self._search_logged = False
+                self._search_ticks = 0
+            #Let AtTarget handle centering from here
+            return Status.RUNNING
+        else:
+            #Reset search state when far away
+            self._search_logged = False
+            self._search_ticks = 0
+        
+        #NAVIGATION (Hysteresis)
+        #Calculate angle error to target
+        target_angle = math.atan2(dy, dx)
+        
+        angle_diff = target_angle - robot_theta
+        while angle_diff > math.pi:
+            angle_diff -= 2 * math.pi
+        while angle_diff < -math.pi:
+            angle_diff += 2 * math.pi
+        
+        #Hysteresis thresholds
+        HYSTERESIS_THRESHOLD = 0.4 #~23 degrees - switch action only if error is big
+        ALIGNMENT_THRESHOLD = 0.2 #~11 degrees - considered aligned with target
+        
+        #Decision logic with hysteresis + sensor awareness
+        left_blocked = d_left < SIDE_OBSTACLE_DIST
+        right_blocked = d_right < SIDE_OBSTACLE_DIST
+
+        if abs(angle_diff) < ALIGNMENT_THRESHOLD:
+            #Well aligned - go straight
+            action = 'MOVE_FORWARD'
+        elif abs(angle_diff) > HYSTERESIS_THRESHOLD:
+            #Big error - need to correct, but check sensors first
+            if angle_diff > 0:
+                #Target is to our LEFT
+                if left_blocked:
+                    action = 'MOVE_FORWARD' #Don't turn into a wall
+                else:
+                    action = 'MOVE_FRONT_LEFT'
+            else:
+                #Target is to our RIGHT
+                if right_blocked:
+                    action = 'MOVE_FORWARD' #Don't turn into a wall
+                else:
+                    action = 'MOVE_FRONT_RIGHT'
+        else:
+            #Medium error - maintain previous action (hysteresis)
+            if self.last_action in ['MOVE_FORWARD', 'MOVE_FRONT_LEFT', 'MOVE_FRONT_RIGHT']:
+                action = self.last_action
+                #Clamp if blocked
+                if action == 'MOVE_FRONT_LEFT' and left_blocked: action = 'MOVE_FORWARD'
+                if action == 'MOVE_FRONT_RIGHT' and right_blocked: action = 'MOVE_FORWARD'
+            else:
+                #Was doing something else (avoidance) - pick appropriate
+                action = 'MOVE_FORWARD'
+        
+        #Log navigation status every 5 seconds (50 ticks at 10Hz)
+        if self._debug_tick % 50 == 0:
+            angle_deg = math.degrees(angle_diff)
+            print(f"[PLAN] NAV -> {target['name'].upper()} | Dist: {distance_to_target:.2f}m | Ang: {angle_deg:+.0f}deg | {action}")
+        
+        self._debug_tick += 1
+        self.last_action = action
+        self.bb.set("plan_action", action)
+        return Status.RUNNING
+
+
+#Object Detection & Recognition
+class SearchObj(py_trees.behaviour.Behaviour):
+    """
+        Search for objects using camera detections and color detection.
+        Priority order:
+        1. Red color = valve (mission objective)
+        2. Explicit valve detection
+        3. Person detection
+        4. Obstacle detection
+    """
+    def __init__(self):
+        super().__init__(name="SearchObj")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("detections", access=py_trees.common.Access.READ)
+        self.bb.register_key("found", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
+    
+    def update(self):
+        detections = self.bb.get("detections") or {}
+        detected_color = self.bb.get("detected_color")
+        
+        #Priority 1: Red color = valve (mission objective)
+        if detected_color and detected_color.lower() == "red":
+            self.bb.set("found", "valve")
+        #Priority 2: Explicit valve from detections
+        elif detections.get("valve"):
+            self.bb.set("found", "valve")
+        #Priority 3: Person detected
+        elif detections.get("person"):
+            self.bb.set("found", "person")
+        #Priority 4: Generic obstacle
+        elif detections.get("obstacle"):
+            self.bb.set("found", "obstacle")
+        else:
+            self.bb.set("found", None)
+        
+        return Status.SUCCESS
+
+
+class RecognitionPerson(py_trees.behaviour.Behaviour):
+    """
+        Check if 'found' equals 'person'. Returns SUCCESS if person found.
+    """
+    def __init__(self):
+        super().__init__(name="RecognitionPerson")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("found", access=py_trees.common.Access.READ)
+    
+    def update(self):
+        return Status.SUCCESS if self.bb.get("found") == "person" else Status.FAILURE
+
+
+class RecognitionObstacle(py_trees.behaviour.Behaviour):
+    """
+        Check if 'found' equals 'obstacle'. Returns SUCCESS if obstacle found.
+    """
+    def __init__(self):
+        super().__init__(name="RecognitionObstacle")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("found", access=py_trees.common.Access.READ)
+    
+    def update(self):
+        return Status.SUCCESS if self.bb.get("found") == "obstacle" else Status.FAILURE
+
+
+class RecognitionValve(py_trees.behaviour.Behaviour):
+    """
+        Check if 'found' equals 'valve'. Returns SUCCESS if valve found.
+    """
+    def __init__(self):
+        super().__init__(name="RecognitionValve")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("found", access=py_trees.common.Access.READ)
+    
+    def update(self):
+        return Status.SUCCESS if self.bb.get("found") == "valve" else Status.FAILURE
+
+
+#Actions & Signals
+class SignalPerson(py_trees.behaviour.Behaviour):
+    """
+        Add 'PersonFound' signal to signals list.
+    """
+    def __init__(self):
+        super().__init__(name="SignalPerson")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("signals", access=py_trees.common.Access.WRITE)
+    
+    def update(self):
+        signals = self.bb.get("signals") or []
+        signals.append("PersonFound")
+        self.bb.set("signals", signals)
+        print(f"[PLAN] PERSON DETECTED - SignalPerson: PersonFound added to signals")
+        return Status.SUCCESS
+
+
+class GoAroundP(py_trees.behaviour.Behaviour):
+    """
+        Smart avoidance for person - turn to the opposite side of where person is detected.
+        Uses detection_zone from camera to decide direction.
+        ALSO saves robot position as human_position on FIRST avoidance.
+    """
+    _human_position_saved = False #Class variable to track if already saved
+    
+    def __init__(self):
+        super().__init__(name="GoAroundP")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+        self.bb.register_key("robot_position", access=py_trees.common.Access.READ)
+        self.bb.register_key("odom_correction", access=py_trees.common.Access.READ)
+        self.bb.register_key("human_position", access=py_trees.common.Access.WRITE)
+    
+    def update(self):
+        #Save human position on FIRST avoidance only
+        if not GoAroundP._human_position_saved:
+            robot_pos_raw = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+            odom_correction = self.bb.get("odom_correction") or {'dx': 0.0, 'dy': 0.0, 'dtheta': 0.0}
+            
+            human_pos = {
+                'x': robot_pos_raw.get('x', 0.0) + odom_correction.get('dx', 0.0),
+                'y': robot_pos_raw.get('y', 0.0) + odom_correction.get('dy', 0.0),
+                'theta': robot_pos_raw.get('theta', 0.0) + odom_correction.get('dtheta', 0.0)
+            }
+            self.bb.set("human_position", human_pos)
+            GoAroundP._human_position_saved = True
+            print(f"[PLAN] HUMAN POSITION SAVED @ ({human_pos['x']:.2f}, {human_pos['y']:.2f})")
+        
+        zone = self.bb.get("detection_zone")
+        dist_left = self.bb.get("distance_left") or 999.0
+        dist_right = self.bb.get("distance_right") or 999.0
+    
+        #Turn opposite to where person is detected
+        if zone == 'left':
+            #Person on left → turn right
+            action = 'TURN_RIGHT'
+        elif zone == 'right':
+            #Person on right → turn left
+            action = 'TURN_LEFT'
+        else:
+            #Person in center → turn to more open side
+            if dist_left > dist_right:
+                action = 'TURN_LEFT'
+            else:
+                action = 'TURN_RIGHT'
+        
+        self.bb.set("plan_action", action)
+        return Status.SUCCESS
+
+
+class GoAroundO(py_trees.behaviour.Behaviour):
+    """
+        Smart avoidance for obstacle - turn to the opposite side of where obstacle is detected.
+        Uses detection_zone from camera to decide direction.
+    """
+    def __init__(self):
+        super().__init__(name="GoAroundO")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("detection_zone", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_left", access=py_trees.common.Access.READ)
+        self.bb.register_key("distance_right", access=py_trees.common.Access.READ)
+    
+    def update(self):
+        zone = self.bb.get("detection_zone")
+        dist_left = self.bb.get("distance_left") or 999.0
+        dist_right = self.bb.get("distance_right") or 999.0
+        
+        #Turn opposite to where obstacle is detected
+        if zone == 'left':
+            action = 'TURN_RIGHT'
+        elif zone == 'right':
+            action = 'TURN_LEFT'
+        else:
+            #Obstacle in center → turn to more open side
+            if dist_left > dist_right:
+                action = 'TURN_LEFT'
+            else:
+                action = 'TURN_RIGHT'
+        
+        self.bb.set("plan_action", action)
+        return Status.SUCCESS
+
+
+class ActiveValve(py_trees.behaviour.Behaviour):
+    """
+        Activate valve - mission objective complete.
+        Adds 'ValveActivated' signal and sets mission_complete flag.
+    """
+    def __init__(self):
+        super().__init__(name="ActiveValve")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("signals", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("mission_complete", access=py_trees.common.Access.WRITE)
+    
+    def update(self):
+        #Add valve activation signal
+        signals = self.bb.get("signals") or []
+        signals.append("ValveActivated")
+        self.bb.set("signals", signals)
+        
+        #Set action and mission complete flag
+        self.bb.set("plan_action", "ACTIVATE_VALVE")
+        self.bb.set("mission_complete", True)
+        print(f"")
+        print(f"[PLAN] =====================================")
+        print(f"[PLAN] MISSION COMPLETE - VALVE ACTIVATED!")
+        print(f"[PLAN] =====================================")
+        print(f"")
+        
+        return Status.SUCCESS
+
+
+class CelebrateMission(py_trees.behaviour.Behaviour):
+    """
+        Celebration behavior after valve activation.
+        The robot stops and plays a victory melody via /cmd_audio.
+        No spinning — just music and a pause.
+    """
+    CELEBRATE_TICKS = 30 #3 seconds at 10Hz (time for melody to play)
+    
+    def __init__(self):
+        super().__init__(name="CelebrateMission")
+        self.bb = self.attach_blackboard_client(name=self.name)
+        self.bb.register_key("plan_action", access=py_trees.common.Access.WRITE)
+        self.bb.register_key("audio_pub", access=py_trees.common.Access.READ)
+        
+        #Internal state
+        self._melody_played = False
+        self._tick_counter = 0
+    
+    def update(self):
+        self.bb.set("plan_action", "STOP")
+        
+        #First tick: play victory melody
+        if not self._melody_played:
+            self._melody_played = True
+            self._tick_counter = 0
+            print(f"")
+            print(f"[PLAN] =============================================")
+            print(f"[PLAN] MISSION COMPLETE! Playing victory melody!")
+            print(f"[PLAN] =============================================")
+            print(f"")
+            self._play_victory_melody()
+            return Status.RUNNING
+        
+        #Wait for melody to finish
+        self._tick_counter += 1
+        if self._tick_counter < self.CELEBRATE_TICKS:
+            return Status.RUNNING
+        
+        #Done
+        print(f"")
+        print(f"[PLAN] =============================================")
+        print(f"[PLAN] CELEBRATION COMPLETE! Mission finished.")
+        print(f"[PLAN] =============================================")
+        print(f"")
+        return Status.SUCCESS
+
+    def _play_victory_melody(self):
+        """Play a triumphant victory fanfare via /cmd_audio."""
+        if not AUDIO_AVAILABLE:
+            print("[AUDIO] irobot_create_msgs not available, skipping melody")
+            return
+        
+        try:
+            audio_pub = self.bb.get("audio_pub")
+            if audio_pub is None:
+                print("[AUDIO] No audio publisher on blackboard")
+                return
+            
+            #Victory fanfare: C5-E5-G5-C6 (ascending), pause, G5-C6 (finale)
+            msg = AudioNoteVector()
+            msg.append = False
+            msg.notes = [
+                AudioNote(frequency=523, max_runtime=Duration(sec=0, nanosec=200000000)),  # C5
+                AudioNote(frequency=659, max_runtime=Duration(sec=0, nanosec=200000000)),  # E5
+                AudioNote(frequency=784, max_runtime=Duration(sec=0, nanosec=200000000)),  # G5
+                AudioNote(frequency=1047, max_runtime=Duration(sec=0, nanosec=400000000)), # C6
+                AudioNote(frequency=0,    max_runtime=Duration(sec=0, nanosec=200000000)), # pause
+                AudioNote(frequency=784,  max_runtime=Duration(sec=0, nanosec=200000000)), # G5
+                AudioNote(frequency=1047, max_runtime=Duration(sec=0, nanosec=600000000)), # C6 long
+            ]
+            audio_pub.publish(msg)
+            print(f"[AUDIO] Victory melody played!")
+        except Exception as e:
+            print(f"[AUDIO] Error playing melody: {e}")
+
+
+#BEHAVIOR TREE CONSTRUCTION
+def build_tree():
+    """
+        Build the complete Behavior Tree for Charlie Robot.
+        
+        Tree Structure:
+        - LoopUntilSuccess (Retry decorator)
+        - Main (Sequence)
+            - Battery (Selector: BatteryCheck or GoCharge)
+            - CalculateTarget
+            - GoToTarget (Selector: AtTarget or MoveAndSearch)
+            - MoveAndSearch (Parallel: MoveToTarget + SearchDecorator)
+                - SearchDecorator (FailureIsSuccess)
+                - Search (Sequence: SearchObj + FoundHandler)
+                    - FoundHandler (Selector: PersonHandler or ObstacleHandler)
+            - RecognitionValve
+            - ActiveValve
+            - CelebrateMission
+    """
+    #Battery management: check battery, go charge if low
+    battery = Selector("Battery", memory=False, children=[
+        BatteryCheck(),
+        GoCharge()
+    ])
+    
+    #Person handling: recognize, signal, and avoid
+    person_seq = Sequence("PersonHandler", memory=False, children=[
+        RecognitionPerson(),
+        SignalPerson(),
+        GoAroundP()
+    ])
+    
+    #Obstacle handling: recognize and avoid
+    obstacle_seq = Sequence("ObstacleHandler", memory=False, children=[
+        RecognitionObstacle(),
+        GoAroundO()
+    ])
+    
+    #Handle found objects (person has priority over obstacle)
+    found_handler = Selector("FoundHandler", memory=False, children=[
+        person_seq,
+        obstacle_seq
+    ])
+    
+    #Search sequence: search for objects, then handle if found
+    search = Sequence("Search", memory=False, children=[
+        SearchObj(),
+        found_handler
+    ])
+    
+    #Decorator to prevent search failure from blocking parallel
+    search_dec = decorators.FailureIsSuccess(
+        name="SearchDecorator",
+        child=search
+    )
+    
+    #Parallel movement with searching
+    move_search = Parallel("MoveAndSearch", 
+        policy=ParallelPolicy.SuccessOnAll(),
+        children=[MoveToTarget(), search_dec]
+    )
+    
+    #Go to target: check if at target, otherwise move with search
+    goto = Selector("GoToTarget", memory=False, children=[
+        AtTarget(),
+        move_search
+    ])
+    
+    #Target search loop: keep searching until valve is found
+    #This inner loop repeats CalculateTarget → GoToTarget until RecognitionValve succeeds
+    target_search = Sequence("TargetSearch", memory=False, children=[
+        CalculateTarget(),
+        goto,
+        #SecondoRetreat(),
+        RecognitionValve(),
+    ])
+    
+    #Retry target search until valve is found (-1 = infinite retries)
+    target_loop = decorators.Retry("TargetLoop", child=target_search, num_failures=-1)
+    
+    #Main mission sequence
+    main = Sequence("Main", memory=True, children=[
+        InitialRetreat(),
+        battery,
+        target_loop,  #Loop until valve found
+        ActiveValve(),
+        CelebrateMission()
+    ])
+    
+    #Retry until mission success
+    root = decorators.Retry("LoopUntilSuccess", child=main, num_failures=-1)
+    
+    return root

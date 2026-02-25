@@ -11,56 +11,88 @@ Il robot deve:
 - Reagire e aggirare ostacoli imprevisti durante il percorso
 - Identificare potenziali vittime e segnalare la loro posizione ai soccorritori
 
+---
 
-## Installazione
+## Struttura del Repository
+
+Il progetto è organizzato in due cartelle principali, una per la simulazione e una per il robot fisico:
+
+```
+Robotica_25/
+├── Charlie_simulation/       # Versione simulata (Gazebo + Docker)
+│   ├── docker/
+│   │   └── docker-compose.yml
+│   ├── models/gazebo/        # Modelli 3D per Gazebo
+│   ├── ros2_create3_sim/     # Simulatore ROS 2 + Gazebo
+│   ├── scripts/
+│   │   └── demo.py
+│   └── src/
+│       ├── sense/            # Modulo percezione (YOLO + sensori)
+│       ├── plan/             # Modulo decisionale (Behavior Tree)
+│       └── act/              # Modulo attuazione
+│
+├── Charlie_physical/         # Versione robot fisico (iRobot Create 3 + Jetson Nano)
+│   ├── docker/
+│   │   └── docker-compose.yml
+│   ├── scripts/
+│   │   ├── configuration.bash
+│   │   ├── run_jetson.bash
+│   │   └── fotocamera.bash
+│   └── src/
+│       ├── sense/
+│       ├── plan/
+│       └── act/
+│
+├── documentation/
+│   └── design_documentation.md
+└── README.md
+```
+
+---
+
+## Charlie Simulation
 
 ### Prerequisiti
-
 - **Docker** installato
 - **8GB+ RAM** consigliati
 - **Browser web** per accesso VNC alla simulazione
 
-### Procedura
+### Installazione
 
 1. **Clonare il repository** (con submodules):
    ```bash
-   git clone --recurse-submodules https://github.com/<your-repo>/Robotica_25.git
+   git clone --recurse-submodules https://github.com/Samu-Cast/Robotica_25.git
    cd Robotica_25
    ```
 
 2. **Build dei container Docker**:
    ```bash
-   cd docker
+   cd Charlie_simulation/docker
    docker compose build
    ```
    > ⚠️ Il primo build potrebbe richiedere 15-30 minuti per compilare ROS 2 e Gazebo.
 
----
+### Esecuzione
 
-## Esecuzione
+1. **Avviare i container**:
+   ```bash
+   cd Charlie_simulation/docker
+   docker compose up
+   ```
 
-### Avviare la Simulazione Completa
+2. **Accesso alla simulazione Gazebo** — aprire il browser e navigare a:
+   ```
+   http://localhost:8080
+   ```
+   - **Password VNC**: `password`
 
-```bash
-cd docker
-docker compose up
-```
+3. **Avviare la simulazione** tramite il terminale VNC:
+   ```bash
+   ~/ros2_ws/start.bash
+   ```
 
-### Accesso alla Simulazione Gazebo
-
-Aprire il browser e navigare a:
-```
-http://localhost:8080
-```
-- **Password VNC**: `password`
-
-Avviare la simulazione tramite l'esecuzione del file: 
-```
-~/ros2_ws/start.bash
-```
 ### Monitoraggio dei Moduli
 
-Visualizzare i log di ciascun container:
 ```bash
 # Log del modulo Sense
 docker logs -f charlie_sense
@@ -72,52 +104,76 @@ docker logs -f charlie_plan
 docker logs -f charlie_act
 ```
 
+### Visualizzazione
 
-### Visualizzazione della Simulazione
-
-La simulazione può essere monitorata attraverso due strumenti:
-
-- **Gazebo**: Visualizza l'ambiente 3D completo con il robot, gli ostacoli e i target. La finestra Gazebo si apre automaticamente dopo aver eseguito `start.bash`.
-
-- **RViz**: Per visualizzare i dati dei sensori, la posizione del robot e i topic ROS 2:
-
-  I topic più utili visualizzati sono:
-  - `/tf` - Trasformazioni del robot
-  - `/odom` - Odometria
-  - `/sense/debug_image` - Feed camera
-
+- **Gazebo**: Visualizza l'ambiente 3D completo con il robot, gli ostacoli e i target. Si apre automaticamente dopo `start.bash`.
+- **RViz**: Topic utili visualizzabili: `/tf`, `/odom`, `/sense/debug_image`.
 
 ### Fermare la Simulazione
 
 ```bash
-cd docker
+cd Charlie_simulation/docker
 docker compose down
 ```
 
 ---
 
-## Struttura del Progetto
+## Charlie Physical
 
+### Piattaforma Hardware
+
+| Componente | Dettaglio |
+|---|---|
+| **Robot** | [iRobot Create 3](https://edu.irobot.com/create3) |
+| **Computer di bordo** | NVIDIA Jetson Nano |
+| **Fotocamera** | IMX219 (CSI camera module) |
+
+### Prerequisiti
+
+- **Jetson Nano 4gb** con microSD (minimo 32 GB consigliati)
+- **iRobot Create 3** acceso e connesso alla stessa rete Wi-Fi
+- **Camera CSI IMX219** collegata al Jetson Nano
+- Alimentazione adeguata per il Jetson Nano (power bank 5V 3A o superiore)
+
+### Setup del Jetson Nano
+
+1. **Flash dell'immagine sulla microSD**:
+   - Scaricare l'immagine ufficiale NVIDIA Jetson Nano Developer Kit SD Card Image dal sito:
+     [https://developer.nvidia.com/embedded/downloads](https://developer.nvidia.com/embedded/downloads)
+   - Flashare l'immagine sulla microSD utilizzando [balenaEtcher](https://etcher.balena.io/) o un tool equivalente.
+   - Inserire la microSD nel Jetson Nano e completare il primo avvio.
+
+2. **Configurazione dell'ambiente**:
+   Eseguire lo script di configurazione che installa Docker, docker-compose e clona il repository:
+   ```bash
+   cd Charlie_physical/scripts
+   bash configuration.bash
+   ```
+
+### Configurazione di Rete e Middleware
+
+1. **Connessione alla rete**: assicurarsi che il Jetson Nano e l'iRobot Create 3 siano connessi alla **stessa rete Wi-Fi**.
+
+2. **Impostare il middleware DDS sul robot**: connettersi all'**Access Point** del Create 3 e, dalla pagina di configurazione web, impostare il middleware RMW su **CycloneDDS** (`rmw_cyclonedds_cpp`).
+   > 💡 Lato Jetson non è necessario esportare manualmente la variabile `RMW_IMPLEMENTATION`: è già definita nel `docker-compose.yml`.
+
+### Esecuzione
+
+Avviare il sistema completo (fotocamera + container Docker) eseguendo:
+```bash
+cd Charlie_physical/scripts
+bash run_jetson.bash
 ```
-Robotica_25/
-├── docker/
-│   └── docker-compose.yml    # Orchestrazione container
-├── documentation/
-│   └── design_documentation.md
-├── models/
-│   └── gazebo/               # Modelli 3D per Gazebo
-├── ros2_create3_sim/         # Simulatore ROS 2 + Gazebo
-├── src/
-│   ├── sense/                # Modulo percezione (YOLO + sensori)
-│   │   ├── sense_node.py
-│   │   ├── color_detector.py
-│   │   └── human_detector.py
-│   ├── plan/                 # Modulo decisionale (Behavior Tree)
-│   │   ├── plan_node.py
-│   │   └── behaviors.py
-│   └── act/                  # Modulo attuazione
-│       └── action_node.py
-└── README.md
+
+Lo script avvia in sequenza:
+1. `camera_host.py` — acquisizione immagini dalla fotocamera IMX219
+2. `docker-compose up` — avvio dei container Sense, Plan e Act
+
+### Fermare il Robot
+
+```bash
+cd Charlie_physical/docker
+docker-compose down
 ```
 
 ---
@@ -127,17 +183,17 @@ Robotica_25/
 ### Test Unitari
 ```bash
 # Test del modulo Plan (Behavior Tree)
-cd src/plan
+cd Charlie_simulation/src/plan
 python -m pytest test_plan_behaviors.py -v
 
 # Test del modulo Sense (helper functions)
-cd src/sense
+cd Charlie_simulation/src/sense
 python -m pytest test_sense_node.py -v
 ```
 
 ### Test del Color Detector
 ```bash
-cd src/sense
+cd Charlie_simulation/src/sense
 python -m pytest test_color_detector.py -v
 ```
 
@@ -150,7 +206,4 @@ Realizzato da:
 - Giammarco Ubaldi
 - Samuele Verna
 
-Progetto sviluppato per il corso **ISRLAB**.
-
----
-
+Progetto sviluppato per il corso **Intelligent Systems and Robotics Laboratory - University of L'Aquila**.

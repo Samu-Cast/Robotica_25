@@ -1,0 +1,59 @@
+version: '3.3'
+
+services:
+
+  sense:
+    build:
+      context: ../src/sense
+    container_name: charlie_sense_physical
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ../src/sense/:/home/ubuntu/sense_ws/
+      - ../models/:/home/ubuntu/models/
+      - /dev/shm:/dev/shm
+      #deploy:
+      #  resources:
+      #    limits:
+      #      cpus: '2.0'
+      #      memory: 2G
+    stdin_open: true
+    tty: true
+    command: python3 sense_node.py
+
+  plan:
+    build:
+      context: ../src/plan
+    container_name: charlie_plan_physical
+    network_mode: host
+    depends_on:
+      - sense
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ../src/plan/:/home/ubuntu/plan_ws/
+    stdin_open: true
+    tty: true
+    command: python3 plan_node.py
+
+  act:
+    build:
+      context: ../src/act
+    container_name: charlie_act_physical
+    network_mode: host
+    depends_on:
+      - sense
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ../src/act/:/home/ubuntu/act_ws/
+    stdin_open: true
+    tty: true
+    command: python3 action_node.py
