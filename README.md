@@ -206,4 +206,4 @@ Realizzato da:
 - Giammarco Ubaldi
 - Samuele Verna
 
-Progetto sviluppato per il corso **Intelligent Systems and Robotics Laboratory - University of L'Aquila**.
+Progetto sviluppato per il corso **Intelligent Systems and Robotics Laboratory - University of L'Aquila**. (https://www.disim.univaq.it/)
