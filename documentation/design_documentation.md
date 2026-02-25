@@ -418,3 +418,34 @@ Simulates valve activation: it appends "ValveActivated" to signals, sets plan_ac
 *GoToHuman
 After activation, it navigates back to human_position in three phases: initial retreat, odometry-based navigation, and visual approach when close. It sets plan_action accordingly and returns SUCCESS when the person is reached (ultrasonic distance below threshold).
 
+# 9. Physical Robot Deployment
+
+The transition from a simulated environment to a physical deployment involves bridging the gap between virtual sensors and physical hardware while maintaining the integrity of the Sense–Plan–Act architecture.
+
+## 9.1 Hardware Platform: iRobot Create 3
+
+For physical deployment, the project utilizes the **iRobot Create 3** educational robot. The system leverages the robot's native ROS 2 interface, allowing the same high-level planning logic used in simulation to run on the real hardware with minimal modifications.
+
+## 9.2 Network Infrastructure
+
+Reliable communication between the robot's internal controller and the external SPA modules (running in Docker containers) is critical. The physical deployment uses:
+
+- **RMW Implementation**: `rmw_cyclonedds_cpp` is selected as the ROS Middleware to ensure robust discovery and data exchange over the wireless network.
+- **Docker Network Mode**: Containers are executed in `host` mode, allowing them to share the host's network stack and communicate directly with the robot without NAT-related discovery issues.
+- **ROS Domain ID**: All components are synchronized on `ROS_DOMAIN_ID=0` to ensure they reside in the same logical network partition.
+
+## 9.3 Sensor Adaptation: IR vs. Ultrasonic
+
+A key challenge in the physical migration is the difference in distance sensing hardware. While the simulation uses ultrasonic sensors, the physical Create 3 relies on an array of **Infrared (IR) Intensity sensors**.
+
+To maintain compatibility with the Behavior Tree without modifying its logic, the `SenseNode` implements an **Adaptation Layer**:
+
+1. **Mapping**: Specific `ir_intensity` frames (front_center_left, side_left, right) are mapped to the logical `front`, `front_left`, and `front_right` channels.
+2. **Translation**: Raw IR intensity values (0-4095) are converted into distance estimates (meters) using a calibrated threshold-based model:
+   - **Low Intensity (<70)**: Path is clear (~0.20m).
+   - **Medium Intensity (70-280)**: Valid detection range (~0.12m).
+   - **High Intensity (280-1150)**: Getting close (~0.08m).
+   - **Very High Intensity (>1150)**: Imminent collision (~0.05m).
+
+This abstraction allows the Planning Layer to remain sensor-agnostic, receiving standard `sensor_msgs/Range` messages regardless of the underlying hardware.
+
