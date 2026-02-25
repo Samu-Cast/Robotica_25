@@ -1,0 +1,45 @@
+services:
+
+  sense:
+    build: ../src/sense
+    container_name: charlie_sense
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - ROS_DOMAIN_ID=42
+      - USE_NNPACK=0
+    volumes:
+      - ../src/sense/:/home/ubuntu/sense_ws/
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 4G
+    stdin_open: true
+    tty: true
+
+  plan:
+    build:
+      context: ../src/plan
+    container_name: charlie_plan
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - ROS_DOMAIN_ID=42
+    volumes:
+      - ../src/plan/:/home/ubuntu/plan_ws/
+    stdin_open: true
+    tty: true
+
+  act:
+    build:
+      context: ../src/act
+    container_name: charlie_act
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      - ROS_DOMAIN_ID=42
+    volumes:
+      - ../src/act/:/home/ubuntu/act_ws/
+    stdin_open: true
+    tty: true
