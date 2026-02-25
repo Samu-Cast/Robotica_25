@@ -35,7 +35,7 @@ def imgmsg_to_cv2(msg, desired_encoding='bgr8'):
     img = np.frombuffer(msg.data, dtype=dtype)
     img = img.reshape(msg.height, msg.width, channels) if channels > 1 else img.reshape(msg.height, msg.width)
 
-    # Conversione encoding se necessario
+    #Conversione encoding se necessario
     if desired_encoding == 'bgr8' and msg.encoding == 'rgb8':
         img = img[:, :, ::-1].copy()
     elif desired_encoding == 'rgb8' and msg.encoding == 'bgr8':

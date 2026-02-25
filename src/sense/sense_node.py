@@ -38,7 +38,7 @@ try:
 except ImportError:
     from image_utils import imgmsg_to_cv2, cv2_to_imgmsg
 
-# Import detection modules
+#Import detection modules
 try:
     from .color_detector import ColorDetector
 except ImportError:
@@ -50,76 +50,74 @@ class SenseNode(Node):
     Main Sense Node - Publishes specialized ROS2 topics for Plan node
     """
     
-    # Map iCreate3 IR sensor frame_ids to internal sensor names
-    # ir_intensity_front_center_left  -> front (center-facing on our robot)
-    # ir_intensity_left -> front_left
-    # ir_intensity_right -> front_right
+    #Map iCreate3 IR sensor frame_ids to internal sensor names
+    #ir_intensity_front_center_left  -> front (center-facing on our robot)
+    #ir_intensity_left -> front_left
+    #ir_intensity_right -> front_right
     IR_SENSOR_MAP = {
         'ir_intensity_front_center_left': 'front',
         'ir_intensity_side_left': 'front_left',
         'ir_intensity_right': 'front_right',
     }
 
-    # IR Intensity -> Distance conversion (threshold-based, calibrated from physical robot)
-    # Thresholds for IR intensity bands:
+    #IR Intensity -> Distance conversion (threshold-based, calibrated from physical robot)
+    #Thresholds for IR intensity bands:
     #   0-70     -> far (no concern)       -> 0.20m (20cm)
     #   70-280   -> valid range            -> 0.12m (12cm)
     #   280-1150 -> medium-close           -> 0.08m (8cm)
     #   >1150    -> danger (too close)     -> 0.05m (5cm)
-    IR_THRESHOLD_LOW = 70          # Below this = far away
-    IR_THRESHOLD_HIGH = 280        # Medium-close starts here
-    IR_THRESHOLD_VERY_HIGH = 1150  # Above this = dangerously close
-    IR_DIST_FAR = 0.20             # 20 cm - far, no concern
-    IR_DIST_MEDIUM = 0.12          # 12 cm - valid detection range
-    IR_DIST_MEDIUM_CLOSE = 0.08    # 8 cm  - getting close
-    IR_DIST_CLOSE = 0.05           # 5 cm  - danger, too close
-    IR_MAX_DISTANCE = 0.20         # meters - max reported distance
+    IR_THRESHOLD_LOW = 70          #Below this = far away
+    IR_THRESHOLD_HIGH = 280        #Medium-close starts here
+    IR_THRESHOLD_VERY_HIGH = 1150  #Above this = dangerously close
+    IR_DIST_FAR = 0.20             #20 cm - far, no concern
+    IR_DIST_MEDIUM = 0.12          #12 cm - valid detection range
+    IR_DIST_MEDIUM_CLOSE = 0.08    #8 cm  - getting close
+    IR_DIST_CLOSE = 0.05           #5 cm  - danger, too close
+    IR_MAX_DISTANCE = 0.20         #meters - max reported distance
 
-    # Minimum bbox area to consider a detection (filters out far detections)
-    # ~5000 px² is roughly a detection at 3m distance
+    #Minimum bbox area to consider a detection (filters out far detections)
+    #~5000 px² is roughly a detection at 3m distance
     MIN_BBOX_AREA = 2000
     
-    # Distance estimation calibration
-    # A target filling ~1/4 of the image (80000 px² on 640x480) is roughly 0.5m
-    BBOX_DISTANCE_SCALE = 40000.0  # pixels² at 1 meter
+    #Distance estimation calibration
+    #A target filling ~1/4 of the image (80000 px² on 640x480) is roughly 0.5m
+    BBOX_DISTANCE_SCALE = 40000.0  #pixels² at 1 meter
     
     def __init__(self):
         super().__init__('sense_node')
         self.get_logger().info('=== Sense Node Starting ===')
         
-
-        
-        # Initialize detectors
+        #Initialize detectors
         self.color_detector = ColorDetector()
         self.get_logger().info('Color detector initialized')
         
-        # State variables - distances in meters (converted from IR intensity)
+        #State variables - distances in meters (converted from IR intensity)
         self.proximity_data = {
             'front': float('inf'),
             'front_left': float('inf'),
             'front_right': float('inf'),
         }
         self.odometry = {'x': 0.0, 'y': 0.0, 'theta': 0.0}
-        self.battery_level = None  # None until first message received
+        self.battery_level = None #None until first message received
         self.color_detections = {'targets': []}
         
-        # Last detection state (for event-driven publishing)
+        #Last detection state (for event-driven publishing)
         self.last_detection = None
-        self.last_detection_zone = None  # Track detection zone for continuous publishing
+        self.last_detection_zone = None #Track detection zone for continuous publishing
         
-        # Frame skipping for CPU optimization
+        #Frame skipping for CPU optimization
         self.frame_count = 0
         self.color_skip_frames = 2
         
-        # Image dimensions for centering check
+        #Image dimensions for centering check
         self.image_width = 640
         self.image_height = 480
         
-        # === SUBSCRIBERS ===
-        # QoS for iCreate3 sensor topics (BEST_EFFORT required by the physical robot)
+        #SUBSCRIBERS
+        #QoS for iCreate3 sensor topics (BEST_EFFORT required by the physical robot)
         from rclpy.qos import qos_profile_sensor_data
         
-        # IR intensity sensors from iCreate3 physical robot
+        #IR intensity sensors from iCreate3 physical robot
         self.create_subscription(
             IrIntensityVector, '/ir_intensity',
             self._ir_intensity_callback, qos_profile_sensor_data
@@ -128,32 +126,32 @@ class SenseNode(Node):
         self.create_subscription(Odometry, '/odom', self._odom_callback, qos_profile_sensor_data)
         self.create_subscription(BatteryState, '/battery_state', self._battery_callback, qos_profile_sensor_data)
         
-        # === PUBLISHERS ===
-        # Proximity sensors (Range messages)
+        #PUBLISHERS
+        #Proximity sensors (Range messages)
         self.proximity_pubs = {
             'front': self.create_publisher(Range, '/sense/proximity/front', 10),
             'front_left': self.create_publisher(Range, '/sense/proximity/front_left', 10),
             'front_right': self.create_publisher(Range, '/sense/proximity/front_right', 10),
         }
         
-        # Odometry (Pose2D)
+        #Odometry (Pose2D)
         self.odometry_pub = self.create_publisher(Pose2D, '/sense/odometry', 10)
         
-        # Detection (String JSON - event-driven)
+        #Detection (String JSON - event-driven)
         self.detection_pub = self.create_publisher(String, '/sense/detection', 10)
         
-        # Detection Zone (String - continuous: 'left', 'center', 'right', 'none')
-        # This allows Plan node to know where detection is in camera frame for centering
+        #Detection Zone (String - continuous: 'left', 'center', 'right', 'none')
+        #This allows Plan node to know where detection is in camera frame for centering
         self.detection_zone_pub = self.create_publisher(String, '/sense/detection_zone', 10)
         
-        # Debug image - publish with larger queue
+        #Debug image - publish with larger queue
         self.debug_image_pub = self.create_publisher(Image, '/sense/debug_image', 30)
         
-        # Battery (Float32 percentage)
+        #Battery (Float32 percentage)
         self.battery_pub = self.create_publisher(Float32, '/sense/battery', 10)
         
-        # Timer to publish proximity and odometry at fixed rate
-        self.create_timer(0.1, self._publish_periodic)  # 10 Hz
+        #Timer to publish proximity and odometry at fixed rate
+        self.create_timer(0.1, self._publish_periodic)  #10 Hz
         
         self.get_logger().info('Sense Node ready')
         self.get_logger().info('  - /sense/proximity/[front|front_left|front_right] (from IR sensors)')
@@ -177,13 +175,13 @@ class SenseNode(Node):
             distance in meters (0.20, 0.12, 0.08, or 0.05)
         """
         if ir_value <= self.IR_THRESHOLD_LOW:
-            return self.IR_DIST_FAR           # Far away - no concern
+            return self.IR_DIST_FAR #Far away - no concern
         elif ir_value <= self.IR_THRESHOLD_HIGH:
-            return self.IR_DIST_MEDIUM        # Valid range
+            return self.IR_DIST_MEDIUM #Valid range
         elif ir_value <= self.IR_THRESHOLD_VERY_HIGH:
-            return self.IR_DIST_MEDIUM_CLOSE  # Getting close
+            return self.IR_DIST_MEDIUM_CLOSE #Getting close
         else:
-            return self.IR_DIST_CLOSE         # Too close - danger
+            return self.IR_DIST_CLOSE #Too close - danger
     
     def _ir_intensity_callback(self, msg: IrIntensityVector):
         """Process IR intensity sensor data from iCreate3
@@ -192,7 +190,7 @@ class SenseNode(Node):
         Each reading has header.frame_id (sensor name) and value (int16).
         Higher value = closer object -> converted to distance in meters.
         """
-        # One-time debug: log all frame_ids on first message
+        #One-time debug: log all frame_ids on first message
         if not hasattr(self, '_ir_debug_done'):
             self._ir_debug_done = True
             all_sensors = [(r.header.frame_id, r.value) for r in msg.readings]
@@ -209,7 +207,7 @@ class SenseNode(Node):
         self.odometry['x'] = msg.pose.pose.position.x
         self.odometry['y'] = msg.pose.pose.position.y
         
-        # Quaternion to yaw
+        #Quaternion to yaw
         q = msg.pose.pose.orientation
         siny_cosp = 2 * (q.w * q.z + q.x * q.y)
         cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
@@ -217,7 +215,7 @@ class SenseNode(Node):
     
     def _battery_callback(self, msg: BatteryState):
         """Process battery state"""
-        # BatteryState.percentage is 0.0-1.0, convert to 0-100
+        #BatteryState.percentage is 0.0-1.0, convert to 0-100
         self.battery_level = msg.percentage * 100.0
     
     def _camera_callback(self, msg: Image):
@@ -226,17 +224,17 @@ class SenseNode(Node):
             self.frame_count += 1
             frame = imgmsg_to_cv2(msg, desired_encoding='bgr8')
             
-            # Update image dimensions
+            #Update image dimensions
             self.image_height, self.image_width = frame.shape[:2]
             
-            # Color Detection
+            #Color Detection
             if self.frame_count % self.color_skip_frames == 0:
                 self.color_detections = self.color_detector.detect(frame)
             
-            # Process detections and publish if changed
+            #Process detections and publish if changed
             self._process_and_publish_detection()
             
-            # Debug image
+            #Debug image
             if self.debug_image_pub.get_subscription_count() > 0:
                 debug_frame = self._draw_debug(frame)
                 self.debug_image_pub.publish(
@@ -254,11 +252,11 @@ class SenseNode(Node):
             format: 'xywh' for [x, y, width, height] or 'xyxy' for [x1, y1, x2, y2]
         """
         if format == 'xywh':
-            # [x, y, width, height] - used by color_detector
+            #[x, y, width, height] - used by color_detector
             x, y, w, h = bbox
             return abs(w * h)
         else:
-            # [x1, y1, x2, y2] - xyxy format
+            #[x1, y1, x2, y2] - xyxy format
             x1, y1, x2, y2 = bbox
             return abs(x2 - x1) * abs(y2 - y1)
     
@@ -308,7 +306,7 @@ class SenseNode(Node):
             return self.proximity_data.get('front_left', float('inf'))
         elif zone == 'right':
             return self.proximity_data.get('front_right', float('inf'))
-        else:  # center
+        else: #center
             return self.proximity_data.get('front', float('inf'))
     
     def _estimate_distance_from_bbox(self, bbox_area):
@@ -327,12 +325,12 @@ class SenseNode(Node):
         
         candidates = []
         
-        # Check for color targets (color_detector uses xywh format)
+        #Check for color targets (color_detector uses xywh format)
         for target in self.color_detections.get('targets', []):
             bbox = target.get('bbox', [0, 0, 0, 0])
             area = self._calculate_bbox_area(bbox, format='xywh')
             
-            # Filter out small detections (too far)
+            #Filter out small detections (too far)
             if area < self.MIN_BBOX_AREA:
                 continue
             
@@ -350,9 +348,9 @@ class SenseNode(Node):
             })
         
 
-        # Select the closest detection (smallest estimated_distance or largest bbox_area)
+        #Select the closest detection (smallest estimated_distance or largest bbox_area)
         if candidates:
-            # Sort by bbox_area descending (larger = closer)
+            #Sort by bbox_area descending (larger = closer)
             candidates.sort(key=lambda x: x['bbox_area'], reverse=True)
             current_detection = candidates[0]
         else:
@@ -366,7 +364,7 @@ class SenseNode(Node):
                 'confidence': 0.0
             }
         
-        # Compare with last detection - publish only if changed
+        #Compare with last detection - publish only if changed
         detection_key = (
             current_detection['type'],
             current_detection['color'],
@@ -376,9 +374,9 @@ class SenseNode(Node):
         if self.last_detection != detection_key:
             self.last_detection = detection_key
             
-            # Publish detection
+            #Publish detection
             msg = String()
-            # Handle inf for JSON serialization
+            #Handle inf for JSON serialization
             det_copy = current_detection.copy()
             if det_copy['estimated_distance'] == float('inf'):
                 det_copy['estimated_distance'] = -1.0
@@ -393,7 +391,7 @@ class SenseNode(Node):
     def _publish_periodic(self):
         """Publish proximity and odometry at fixed rate"""
         
-        # Publish proximity as distances in meters (converted from IR intensity)
+        #Publish proximity as distances in meters (converted from IR intensity)
         for sensor_name, distance in self.proximity_data.items():
             msg = Range()
             msg.header.stamp = self.get_clock().now().to_msg()
@@ -405,24 +403,24 @@ class SenseNode(Node):
             msg.range = distance if distance < float('inf') else -1.0
             self.proximity_pubs[sensor_name].publish(msg)
         
-        # Publish odometry
+        #Publish odometry
         odom_msg = Pose2D()
         odom_msg.x = self.odometry['x']
         odom_msg.y = self.odometry['y']
         odom_msg.theta = self.odometry['theta']
         self.odometry_pub.publish(odom_msg)
         
-        # Publish battery (only if we have received data)
+        #Publish battery (only if we have received data)
         if self.battery_level is not None:
             battery_msg = Float32()
             battery_msg.data = self.battery_level
             self.battery_pub.publish(battery_msg)
         
-        # Publish detection zone continuously (for color centering in Plan node)
-        # Determine zone from LATEST color detections
+        #Publish detection zone continuously (for color centering in Plan node)
+        #Determine zone from LATEST color detections
         current_zone = 'none'
         
-        # Check color targets
+        #Check color targets
         for target in self.color_detections.get('targets', []):
             bbox = target.get('bbox', [0, 0, 0, 0])
             area = self._calculate_bbox_area(bbox, format='xywh')
@@ -442,14 +440,14 @@ class SenseNode(Node):
         
         debug = self.color_detector.draw_detections(frame, self.color_detections)
         
-        # Draw sensor info (distances in meters, converted from IR)
+        #Draw sensor info (distances in meters, converted from IR)
         ir_text = f"IR: F={self.proximity_data['front']:.2f}m FL={self.proximity_data['front_left']:.2f}m FR={self.proximity_data['front_right']:.2f}m"
         cv2.putText(debug, ir_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
         pos_text = f"Pos: x={self.odometry['x']:.2f} y={self.odometry['y']:.2f} θ={self.odometry['theta']:.2f}"
         cv2.putText(debug, pos_text, (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
-        # Draw current detection
+        #Draw current detection
         det_text = f"Detection: {self.last_detection}"
         cv2.putText(debug, det_text, (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
         

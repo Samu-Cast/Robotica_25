@@ -39,15 +39,14 @@ class CameraNode(Node):
         self.get_logger().info(f'Leggo frame da: {self.frame_path}')
         self.get_logger().info('Assicurati che camera_host.py sia in esecuzione sull\'host!')
 
-        # Timer a 15 FPS per controllare e pubblicare nuovi frame
+        #Timer a 15 FPS per controllare e pubblicare nuovi frame
         self.timer = self.create_timer(1.0 / 15, self._publish_frame)
 
-        # Log periodico se il file non esiste
+        #Log periodico se il file non esiste
         self._warn_count = 0
 
     def _publish_frame(self):
         if not os.path.exists(self.frame_path):
-            # ... (tuo codice di log) ...
             return
 
         try:
@@ -57,15 +56,15 @@ class CameraNode(Node):
 
             self.last_mtime = mtime
             
-            # Lettura del frame
+            #Lettura del frame
             frame = cv2.imread(self.frame_path)
 
             if frame is not None:
                 msg = cv2_to_imgmsg(frame, encoding='bgr8')
-                # Usa il tempo di modifica del file per una sincronizzazione più precisa
-                # invece del tempo "attuale" di ricezione
+                #Usa il tempo di modifica del file per una sincronizzazione più precisa
+                #invece del tempo "attuale" di ricezione
                 msg.header.stamp = self.get_clock().now().to_msg()
-                msg.header.frame_id = 'camera_front_link' # Convenzione standard _link
+                msg.header.frame_id = 'camera_front_link' #Convenzione standard _link
                 self.pub.publish(msg)
             else:
                 self.get_logger().warn('Frame letto corrotto o vuoto', throttle_duration_sec=5.0)

@@ -14,7 +14,7 @@ class ColorDetector:
     """
     
     def __init__(self):
-        # Color detection parameters (HSV ranges)
+        #Color detection parameters (HSV ranges)
         self.target_colors = {
             'green': {
                 'lower': np.array([40, 30, 30]),
@@ -34,7 +34,7 @@ class ColorDetector:
                 'draw_color': (0, 0, 255)
             }
         }
-        self.min_area = 2000  # Minimum contour area to consider
+        self.min_area = 2000 #Minimum contour area to consider
     
     def detect(self, frame):
         """
@@ -63,7 +63,7 @@ class ColorDetector:
             return self._empty_result()
         
         try:
-            # Pre-processing
+            #Pre-processing
             blurred = cv2.GaussianBlur(frame, (5, 5), 0)
             hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
             
@@ -71,33 +71,33 @@ class ColorDetector:
             colors_detected = set()
             
             for color_name, params in self.target_colors.items():
-                # Create mask for this color
+                #Create mask for this color
                 mask = cv2.inRange(hsv, params['lower'], params['upper'])
                 
-                # If second range exists (e.g. red wraps around in HSV), combine masks
+                #If second range exists, combine masks
                 if 'lower2' in params:
                     mask2 = cv2.inRange(hsv, params['lower2'], params['upper2'])
                     mask = cv2.bitwise_or(mask, mask2)
                 
-                # Clean up mask
+                #Clean up mask
                 kernel = np.ones((5, 5), np.uint8)
                 mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
                 
-                # Find contours
+                #Find contours
                 contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 
                 for cnt in contours:
                     area = cv2.contourArea(cnt)
                     
                     if area > self.min_area:
-                        # Approximate polygon
+                        #Approximate polygon
                         perimeter = cv2.arcLength(cnt, True)
                         approx = cv2.approxPolyDP(cnt, 0.02 * perimeter, True)
                         
-                        # Check if it's a rectangle (4 vertices)
+                        #Check if it's a rectangle (4 vertices)
                         is_rectangle = len(approx) == 4
                         
-                        # Get bounding box
+                        #Get bounding box
                         x, y, w, h = cv2.boundingRect(cnt)
                         cx = x + w // 2
                         cy = y + h // 2
@@ -112,10 +112,10 @@ class ColorDetector:
                         
                         colors_detected.add(color_name)
             
-            # Sort by area (largest first)
+            #Sort by area (largest first)
             targets.sort(key=lambda x: x['area'], reverse=True)
             
-            # Main color is the largest target
+            #Main color is the largest target
             main_color = targets[0]['color'] if targets else None
             
             return {
@@ -153,13 +153,13 @@ class ColorDetector:
             x, y, w, h = target['bbox']
             color_name = target['color']
             
-            # Get draw color
+            #Get draw color
             draw_color = self.target_colors.get(color_name, {}).get('draw_color', (255, 255, 255))
             
-            # Draw rectangle
+            #Draw rectangle
             cv2.rectangle(annotated, (x, y), (x + w, y + h), draw_color, 2)
             
-            # Draw label
+            #Draw label
             label = f"{color_name}"
             if target['is_rectangle']:
                 label += " [Rect]"
@@ -169,7 +169,7 @@ class ColorDetector:
         return annotated
 
 
-# Singleton instance for easy import
+#Singleton instance for easy import
 _detector_instance = None
 
 def get_color_detector():
@@ -180,7 +180,7 @@ def get_color_detector():
     return _detector_instance
 
 
-# === ROS2 Node (optional, for standalone use) ===
+#ROS2 Node (optional, for standalone use)
 
 def main(args=None):
     """Run as standalone ROS2 node"""
@@ -214,7 +214,7 @@ def main(args=None):
                 if results['main_color']:
                     self.get_logger().info(f"Detected: {results['colors_detected']}")
                 
-                # Publish debug image
+                #Publish debug image
                 annotated = self.detector.draw_detections(frame, results)
                 out_msg = self.bridge.cv2_to_imgmsg(annotated, encoding='bgr8')
                 self.debug_pub.publish(out_msg)

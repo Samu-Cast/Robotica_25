@@ -25,11 +25,11 @@ import time
 import sys
 import subprocess
 
-# Configurazione
+#Configurazione
 WIDTH = 640
 HEIGHT = 480
 FPS = 15
-FRAME_SIZE = WIDTH * HEIGHT * 3  # BGR = 3 bytes per pixel
+FRAME_SIZE = WIDTH * HEIGHT * 3  #BGR = 3 bytes per pixel
 
 def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -38,8 +38,8 @@ def main():
 
     interval = 1.0 / FPS
 
-    # Pipeline GStreamer che scrive frame BGR raw su stdout
-    # Funziona perché gst-launch-1.0 supporta nvarguscamerasrc nativamente
+    #Pipeline GStreamer che scrive frame BGR raw su stdout
+    #Funziona perché gst-launch-1.0 supporta nvarguscamerasrc nativamente
     gst_cmd = [
         'gst-launch-1.0', '-q',
         'nvarguscamerasrc', '!',
@@ -65,7 +65,7 @@ def main():
         print('[camera_host] ERRORE: gst-launch-1.0 non trovato!')
         sys.exit(1)
 
-    # Verifica che il processo sia partito
+    #Verifica che il processo sia partito
     time.sleep(1.0)
     if proc.poll() is not None:
         stderr = proc.stderr.read().decode('utf-8', errors='replace')
@@ -81,26 +81,26 @@ def main():
         while True:
             t0 = time.time()
 
-            # Leggi esattamente un frame BGR raw dallo stdout
+            #Leggi esattamente un frame BGR raw dallo stdout
             raw = proc.stdout.read(FRAME_SIZE)
             if len(raw) != FRAME_SIZE:
                 print('[camera_host] WARN: frame incompleto ({}/{}), stream terminato?'.format(len(raw), FRAME_SIZE))
                 break
 
-            # Converti bytes raw in immagine numpy BGR
+            #Converti bytes raw in immagine numpy BGR
             frame = np.frombuffer(raw, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3))
 
-            # Salva come JPEG (scrittura atomica: tmp + rename)
+            #Salva come JPEG (scrittura atomica: tmp + rename)
             ok, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             if ok:
                 with open(tmp_path, 'wb') as f:
                     f.write(buf.tobytes())
                 os.rename(tmp_path, output_path)
                 frame_count += 1
-                if frame_count % (FPS * 5) == 0:  # Log ogni 5 secondi
+                if frame_count % (FPS * 5) == 0:  #Log ogni 5 secondi
                     print('[camera_host] Frame #{} salvato ({}x{})'.format(frame_count, WIDTH, HEIGHT))
 
-            # Mantieni il framerate
+            #Mantieni il framerate
             elapsed = time.time() - t0
             if elapsed < interval:
                 time.sleep(interval - elapsed)

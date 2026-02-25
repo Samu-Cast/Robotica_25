@@ -27,7 +27,7 @@ class FrameSaver(Node):
         self.create_subscription(Image, '/camera_front/image', self.raw_cb, 10)
         self.create_subscription(Image, '/sense/debug_image', self.debug_cb, 10)
 
-        # Salva ogni 5 secondi
+        #Salva ogni 5 secondi
         self.create_timer(5.0, self.save_frames)
         self.get_logger().info('Frame saver attivo — salvataggio ogni 5 secondi (Ctrl+C per uscire)')
 

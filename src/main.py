@@ -116,9 +116,6 @@ def main():
             tree_status = tree.status
             
             #ACT
-            #(In FASE 1, controller just logs)
-            #Tree behaviors already execute actions via logger
-            
             current_action = controller.get_current_action()
             
             #Visualize
