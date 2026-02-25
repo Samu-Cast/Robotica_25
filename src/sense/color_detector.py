@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Color Detector - Detects colored rectangular targets
-Can be used as a standalone ROS node or as a module
+Color Detector module for identifying colored rectangular targets.
+Supports standalone ROS 2 execution or integration as a module.
 """
 
 import cv2
@@ -10,11 +10,11 @@ import numpy as np
 
 class ColorDetector:
     """
-    Detects colored rectangular targets in images
+        Detects and localizes colored rectangular targets in BGR images.
     """
     
     def __init__(self):
-        #Color detection parameters (HSV ranges)
+        #HSV ranges for target identification
         self.target_colors = {
             'green': {
                 'lower': np.array([40, 30, 30]),
@@ -34,30 +34,17 @@ class ColorDetector:
                 'draw_color': (0, 0, 255)
             }
         }
-        self.min_area = 2000 #Minimum contour area to consider
+        self.min_area = 2000
     
     def detect(self, frame):
         """
-        Detect colored targets in frame
+        Detect colored targets in a frame.
         
         Args:
-            frame: numpy array (BGR image from OpenCV)
+            frame: OpenCV BGR image.
             
         Returns:
-            dict: {
-                'colors_detected': list of color names found,
-                'main_color': str or None (largest detected color),
-                'targets': [
-                    {
-                        'color': str,
-                        'area': int,
-                        'bbox': [x, y, w, h],
-                        'center': (cx, cy),
-                        'is_rectangle': bool
-                    },
-                    ...
-                ]
-            }
+            Dict containing detected colors, the dominant color, and target metadata.
         """
         if frame is None:
             return self._empty_result()
@@ -138,14 +125,14 @@ class ColorDetector:
     
     def draw_detections(self, frame, results):
         """
-        Draw bounding boxes on frame
+        Draw detection overlays on the frame.
         
         Args:
-            frame: Original frame
-            results: Detection results from detect()
+            frame: Base image.
+            results: Detection metadata.
             
         Returns:
-            frame with boxes drawn
+            Annotated image.
         """
         annotated = frame.copy()
         

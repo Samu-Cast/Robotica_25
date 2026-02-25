@@ -22,10 +22,10 @@ class ActNode(Node):
     def __init__(self):
         super().__init__('act_node')
 
-        #Publisher verso il robot
+        #Robot velocity publisher
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        #Subscriber dal PLAN che miinvia Sam
+        #Plan command subscriber
         self.plan_sub = self.create_subscription(
             String,
             '/plan/command',
@@ -33,7 +33,7 @@ class ActNode(Node):
             10
         )
 
-        #Stato di default è stop eprche parte fermo
+        #Default state: STOP
         self.state = ActState.STOP
 
         #Gestione SearchValve 
@@ -45,7 +45,7 @@ class ActNode(Node):
         self.activate_duration = 10.0 #secondi
         self.activate_speed = 1.0 #rad/s
 
-        #Timer di controllo (10 Hz)
+        #Control loop timer (10 Hz)
         self.timer = self.create_timer(0.1, self.control_loop)
 
         self.get_logger().info("ACT NODE AVVIATO (Twist - Robot Fisico)")
@@ -145,8 +145,8 @@ class ActNode(Node):
         elif self.state == ActState.ACTIVATE_VALVE:
             if not self.activate_finished():
                 self.send_cmd(0.0, self.activate_speed)
-            else:
-                self.send_cmd(0.0, 0.0)
+        else:
+            self.send_cmd(0.0, 0.0)
                 self.state = ActState.STOP
                 self.get_logger().info("Attivazione valvola completata")
     

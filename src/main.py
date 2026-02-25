@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-    Charlie Robot - Main Entry Point (FASE 1)
-    Integrazione completa: Sense-Plan-Act
+Charlie Robot - Main Entry Point
+Integrated Sense-Plan-Act system loop.
 """
 
 import sys
@@ -9,7 +9,7 @@ import argparse
 from pathlib import Path
 import py_trees
 
-#Import moduli Charlie
+#Charlie module imports
 from sense import CharlieDetector, FrameReader
 from plan import create_rescue_tree
 from act.controller import ActionController

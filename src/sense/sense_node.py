@@ -60,20 +60,15 @@ class SenseNode(Node):
         'ir_intensity_right': 'front_right',
     }
 
-    #IR Intensity -> Distance conversion (threshold-based, calibrated from physical robot)
-    #Thresholds for IR intensity bands:
-    #   0-70     -> far (no concern)       -> 0.20m (20cm)
-    #   70-280   -> valid range            -> 0.12m (12cm)
-    #   280-1150 -> medium-close           -> 0.08m (8cm)
-    #   >1150    -> danger (too close)     -> 0.05m (5cm)
-    IR_THRESHOLD_LOW = 70          #Below this = far away
-    IR_THRESHOLD_HIGH = 280        #Medium-close starts here
-    IR_THRESHOLD_VERY_HIGH = 1150  #Above this = dangerously close
-    IR_DIST_FAR = 0.20             #20 cm - far, no concern
-    IR_DIST_MEDIUM = 0.12          #12 cm - valid detection range
-    IR_DIST_MEDIUM_CLOSE = 0.08    #8 cm  - getting close
-    IR_DIST_CLOSE = 0.05           #5 cm  - danger, too close
-    IR_MAX_DISTANCE = 0.20         #meters - max reported distance
+    # IR Intensity -> Distance conversion parameters (calibrated from physical robot)
+    IR_THRESHOLD_LOW = 70
+    IR_THRESHOLD_HIGH = 280
+    IR_THRESHOLD_VERY_HIGH = 1150
+    IR_DIST_FAR = 0.20
+    IR_DIST_MEDIUM = 0.12
+    IR_DIST_MEDIUM_CLOSE = 0.08
+    IR_DIST_CLOSE = 0.05
+    IR_MAX_DISTANCE = 0.20
 
     #Minimum bbox area to consider a detection (filters out far detections)
     #~5000 px² is roughly a detection at 3m distance
@@ -113,8 +108,7 @@ class SenseNode(Node):
         self.image_width = 640
         self.image_height = 480
         
-        #SUBSCRIBERS
-        #QoS for iCreate3 sensor topics (BEST_EFFORT required by the physical robot)
+        #Subscribers (using best-effort for sensor data)
         from rclpy.qos import qos_profile_sensor_data
         
         #IR intensity sensors from iCreate3 physical robot

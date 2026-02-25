@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Sostituto leggero di cv_bridge usando solo numpy.
-Evita la dipendenza da cv_bridge (che richiede compatibilità ABI
-tra OpenCV di sistema e numpy di pip).
+Lightweight alternative to cv_bridge using only numpy.
+Avoids cv_bridge dependencies and ABI compatibility issues.
 """
 
 import numpy as np
@@ -10,14 +9,14 @@ from sensor_msgs.msg import Image
 
 
 def imgmsg_to_cv2(msg, desired_encoding='bgr8'):
-    """Converte un messaggio ROS Image in un array numpy (come cv_bridge).
+    """Converts a ROS Image message to a numpy array (cv_bridge style).
     
     Args:
         msg: sensor_msgs/Image message
         desired_encoding: ignorato se msg.encoding corrisponde già
         
     Returns:
-        numpy array (H, W, 3) uint8 per immagini BGR/RGB
+        numpy array (H, W, 3) uint8 for BGR/RGB images
     """
     channels = 3
     dtype = np.uint8
@@ -45,7 +44,7 @@ def imgmsg_to_cv2(msg, desired_encoding='bgr8'):
 
 
 def cv2_to_imgmsg(frame, encoding='bgr8'):
-    """Converte un array numpy OpenCV in un messaggio ROS Image.
+    """Converts a numpy array to a ROS Image message.
     
     Args:
         frame: numpy array (H, W, 3) o (H, W) uint8

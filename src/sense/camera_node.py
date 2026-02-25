@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """
-Camera Node - Legge frame dal volume condiviso e li pubblica su ROS2
+Camera Node - Reads frames from the shared volume and publishes to ROS2.
 
-Pubblica:
-    - /camera_front/image (Image) - frame BGR dalla camera
-
-Lo script camera_host.py (sull'host Jetson) cattura i frame dalla camera CSI
-e li salva come shared_frame.jpg nel volume condiviso.
-Questo nodo li legge e li pubblica come topic ROS2 per il sense_node.
+Publishes:
+    - /camera_front/image (Image): BGR frames from the camera
 """
 
 import os
@@ -26,7 +22,7 @@ SHARED_FRAME_PATH = '/dev/shm/shared_frame.jpg'
 
 
 class CameraNode(Node):
-    """Nodo ROS2 che legge frame dal volume condiviso e li pubblica."""
+    """ROS2 node that reads images from disk and republishes them as a topic."""
 
     def __init__(self):
         super().__init__('camera_node')
@@ -39,7 +35,7 @@ class CameraNode(Node):
         self.get_logger().info(f'Leggo frame da: {self.frame_path}')
         self.get_logger().info('Assicurati che camera_host.py sia in esecuzione sull\'host!')
 
-        #Timer a 15 FPS per controllare e pubblicare nuovi frame
+        #15 FPS timer to check for and publish new frames
         self.timer = self.create_timer(1.0 / 15, self._publish_frame)
 
         #Log periodico se il file non esiste

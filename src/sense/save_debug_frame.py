@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """
-Salva un frame dalla camera e dal debug image ogni 5 secondi.
-Usa: python3 save_debug_frame.py
-I file vengono salvati in /home/ubuntu/sense_ws/ (visibili dall'host via volume mount)
-Ctrl+C per uscire.
+Saves a frame from the camera and the debug image every 5 seconds.
+Used for visual debugging and verification.
 """
 
 import time

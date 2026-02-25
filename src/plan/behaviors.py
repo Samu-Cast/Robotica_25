@@ -1,11 +1,6 @@
 """
-    Charlie Robot - Behavior Tree Module
-    Behavior Tree nodes and construction for robot decision making.
-
-    This module contains:
-    - Helper functions for navigation calculations
-    - All Behavior Tree node classes
-    - build_tree() function to construct the complete tree
+Charlie Robot - Behavior Tree Module
+Defines the behavior logic and tree construction for robot decision-making.
 """
 
 import math
@@ -26,15 +21,11 @@ except ImportError:
     AUDIO_AVAILABLE = False
 
 
-#KNOWN TARGETS CONFIGURATION
-# Define the map locations and their coordinates
-# Robot does NOT know which target is the valve - must check each one
-# theta = robot orientation at arrival (radians, 0 = facing right, π/2 = facing up)
+# Known target locations
 KNOWN_TARGETS = {
-    #Color-based targets - robot will visit these and check for valve
-    'green': {'x': -2.0, 'y': 0.0, 'theta': 3.14}, #la x è 
+    'green': {'x': -2.0, 'y': 0.0, 'theta': 3.14},
     'blue': {'x': -1.0, 'y': 1.0, 'theta': 1.57},
-    'red': {'x': -2.0, 'y': -1.0, 'theta': -1.57},  # This is actually the valve, but robot doesn't know
+    'red': {'x': -2.0, 'y': -1.0, 'theta': -1.57}, #Valve location
 }
 
 #HOME/SPAWN POSITION - Will be saved automatically when robot starts
@@ -93,14 +84,7 @@ def calculate_best_direction(distance_left, distance_center, distance_right, thr
 
 def calculate_closest_target(robot_pos, visited_targets):
     """
-        Find the closest unvisited target from KNOWN_TARGETS.
-        
-        Args:
-            robot_pos: Dict with robot position {'x': float, 'y': float, 'theta': float}
-            visited_targets: List of already visited target names
-        
-        Returns:
-            Dict with target info {'name', 'x', 'y', 'theta', 'distance'} or None if all visited
+        Find the closest unvisited target from current position.
     """
     robot_x = robot_pos.get('x', 0.0)
     robot_y = robot_pos.get('y', 0.0)
@@ -142,14 +126,7 @@ def calculate_closest_target(robot_pos, visited_targets):
 
 def calculate_direction_to_target(robot_pos, target):
     """
-        Calculate the steering direction to reach target.
-        
-        Args:
-            robot_pos: Dict {'x', 'y', 'theta'} - current robot position and orientation
-            target: Dict {'x', 'y', 'theta'} - target position and orientation
-        
-        Returns:
-            str: 'MOVE_FORWARD', 'TURN_LEFT', or 'TURN_RIGHT'
+        Calculate the steering action required to reach a target.
     """
     robot_x = robot_pos.get('x', 0.0)
     robot_y = robot_pos.get('y', 0.0)
@@ -184,18 +161,7 @@ def calculate_direction_to_target(robot_pos, target):
 
 def check_wall_alignment(distance_left, distance_right, threshold=0.05):
     """
-        Check if robot is aligned with wall (facing straight).
-        
-        When left and right sensors read approximately the same distance,
-        the robot is perpendicular to the wall.
-        
-        Args:
-            distance_left: Left sensor reading (meters)
-            distance_right: Right sensor reading (meters)
-            threshold: Maximum allowed difference (default 0.05m = 5cm)
-        
-        Returns:
-            bool: True if aligned, False otherwise
+        Check if the robot is aligned perpendicularly with a wall.
     """
     if distance_left is None or distance_right is None:
         return False
@@ -209,7 +175,6 @@ def check_wall_alignment(distance_left, distance_right, threshold=0.05):
 #Battery Management
 class BatteryCheck(py_trees.behaviour.Behaviour):
     """
-        Check if battery level is sufficient for operation.
         Returns SUCCESS if battery > 20%, FAILURE otherwise.
     """
     def __init__(self):
@@ -224,9 +189,7 @@ class BatteryCheck(py_trees.behaviour.Behaviour):
 
 class GoCharge(py_trees.behaviour.Behaviour):
     """
-        Navigate to charging station and recharge battery.
-        Charging station is located at spawn point.
-        Uses 3-sensor direction calculation for navigation.
+        Navigate to the charging station and recharge.
     """
     def __init__(self):
         super().__init__(name="GoCharge")
@@ -684,7 +647,6 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         self.bb.register_key("detection_confidence", access=py_trees.common.Access.READ)
         self.bb.register_key("detected_color", access=py_trees.common.Access.READ)
         
-        #Internal State
         self.avoiding = False
         self.recovery_steps = 0
         self.last_action = "STOP"
@@ -701,12 +663,10 @@ class MoveToTarget(py_trees.behaviour.Behaviour):
         self._search_logged = False
 
     def update(self):
-        #Get Target (Persistent)
-        #Fallisce 
         target = self.bb.get("current_target")
         if not target:
             self.bb.set("plan_action", "STOP")
-            return Status.FAILURE #Should trigger CalculateTarget
+            return Status.FAILURE
 
         #Update Blackboard Goal (for logging/debug)
         self.bb.set("goal_pose", target)
@@ -1200,9 +1160,9 @@ class CelebrateMission(py_trees.behaviour.Behaviour):
                 AudioNote(frequency=659, max_runtime=Duration(sec=0, nanosec=200000000)),  # E5
                 AudioNote(frequency=784, max_runtime=Duration(sec=0, nanosec=200000000)),  # G5
                 AudioNote(frequency=1047, max_runtime=Duration(sec=0, nanosec=400000000)), # C6
-                AudioNote(frequency=0,    max_runtime=Duration(sec=0, nanosec=200000000)), # pausa
+                AudioNote(frequency=0,    max_runtime=Duration(sec=0, nanosec=200000000)), # pause
                 AudioNote(frequency=784,  max_runtime=Duration(sec=0, nanosec=200000000)), # G5
-                AudioNote(frequency=1047, max_runtime=Duration(sec=0, nanosec=600000000)), # C6 lungo
+                AudioNote(frequency=1047, max_runtime=Duration(sec=0, nanosec=600000000)), # C6 long
             ]
             audio_pub.publish(msg)
             print(f"[AUDIO] Victory melody played!")

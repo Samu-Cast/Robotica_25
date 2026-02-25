@@ -1,21 +1,9 @@
 #!/usr/bin/env python3
 """
-Camera Host - Cattura frame dalla camera CSI del Jetson e li salva su disco.
+Camera Host - Captures frames from Jetson CSI camera and saves to disk.
 
-Questo script gira SULL'HOST (fuori Docker) perché la camera CSI
-richiede il driver NVIDIA Argus che non è disponibile nel container.
-
-I frame vengono salvati nel volume condiviso con il container sense,
-che li legge e li pubblica come topic ROS2.
-
-NOTA: Usa GStreamer via subprocess (non OpenCV VideoCapture) perché
-OpenCV 3.2 sul Jetson non ha il backend GStreamer compilato.
-
-Uso:
-    python3 camera_host.py
-
-Il file viene salvato in: /dev/shm/shared_frame.jpg
-(shared memory, montata anche nel container Docker)
+Runs on the HOST (outside Docker) because the CSI camera requires 
+NVIDIA Argus drivers. Saves frames to a shared volume for the Sense container.
 """
 
 import cv2
@@ -38,8 +26,7 @@ def main():
 
     interval = 1.0 / FPS
 
-    #Pipeline GStreamer che scrive frame BGR raw su stdout
-    #Funziona perché gst-launch-1.0 supporta nvarguscamerasrc nativamente
+    #GStreamer pipeline to output raw BGR frames to stdout
     gst_cmd = [
         'gst-launch-1.0', '-q',
         'nvarguscamerasrc', '!',
