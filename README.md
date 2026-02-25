@@ -1,20 +1,18 @@
 # Charlie Robot - Autonomous Hazardous Environment Navigation
 
-![iRobot Create 3](documentation/robot_body.png)
-
-## 📋 Descrizione del Progetto
+## Descrizione del Progetto
 
 **Charlie** è un robot mobile autonomo progettato per operare in ambienti interni pericolosi colpiti da fuoriuscite accidentali di sostanze tossiche. Il progetto simula uno scenario in un laboratorio chimico dove una perdita di contaminante ha compromesso la qualità dell'aria e la visibilità, rendendo pericoloso l'intervento umano.
 
 ### Missione Principale
 Il robot deve:
-- 🎯 Raggiungere e simulare l'attivazione del sistema di ventilazione d'emergenza (rappresentato da un target rosso)
-- 🔍 Esplorare autonomamente l'ambiente navigando verso punti candidati predefiniti
-- 🚧 Reagire e aggirare ostacoli imprevisti durante il percorso
-- 🧍 Identificare potenziali vittime e segnalare la loro posizione ai soccorritori
+- Raggiungere e simulare l'attivazione del sistema di ventilazione d'emergenza (rappresentato da un target rosso)
+- Esplorare autonomamente l'ambiente navigando verso punti candidati predefiniti
+- Reagire e aggirare ostacoli imprevisti durante il percorso
+- Identificare potenziali vittime e segnalare la loro posizione ai soccorritori
 
 
-## 🚀 Installazione
+## Installazione
 
 ### Prerequisiti
 
@@ -39,7 +37,7 @@ Il robot deve:
 
 ---
 
-## ▶️ Esecuzione
+## Esecuzione
 
 ### Avviare la Simulazione Completa
 
@@ -98,7 +96,7 @@ docker compose down
 
 ---
 
-## 📁 Struttura del Progetto
+## Struttura del Progetto
 
 ```
 Robotica_25/
@@ -124,7 +122,7 @@ Robotica_25/
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ### Test Unitari
 ```bash
@@ -145,7 +143,7 @@ python -m pytest test_color_detector.py -v
 
 ---
 
-## 👥 Autori
+## Autori
 
 Realizzato da:
 - Samuele Castellani

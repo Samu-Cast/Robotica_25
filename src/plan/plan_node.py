@@ -1,19 +1,6 @@
 """
-    Charlie Robot - Plan Module
-    Behavior Tree-based decision making for ROS2
-
-    This module implements the strategic decision layer for the Charlie Robot.
-    It receives sensor data from Sense module, makes decisions using a Behavior Tree,
-    and sends commands to the Act module for physical execution.
-
-    Subscribes to:
-        /sense/proximity/front, front_left, front_right (Range) - ultrasonic distances
-        /sense/odometry (Pose2D) - robot position {x, y, theta}
-        /sense/detection (String JSON) - current detection event
-
-    Publishes to:
-        /plan/command - String command for Act (Front, Left, Right, Stop)
-        /plan/signals - JSON array of event signals ["PersonFound", "ValveActivated"]
+Charlie Robot - Plan Module
+Behavior Tree-based decision making for navigation and mission logic.
 """
 
 import json
@@ -26,13 +13,21 @@ try:
     import rclpy
     from rclpy.node import Node
     from std_msgs.msg import String, Float32, Bool
-    from rosgraph_msgs.msg import Clock
     from sensor_msgs.msg import Range
-    from geometry_msgs.msg import Pose2D
+    from geometry_msgs.msg import Pose2D, Pose
+    from irobot_create_msgs.srv import ResetPose
     ROS2_AVAILABLE = True
 except ImportError:
     ROS2_AVAILABLE = False
     Node = object
+
+#Audio messages (separate try/except to not break ROS2 if unavailable)
+try:
+    from builtin_interfaces.msg import Duration
+    from irobot_create_msgs.msg import AudioNoteVector, AudioNote
+    AUDIO_AVAILABLE = True
+except ImportError:
+    AUDIO_AVAILABLE = False
 
 #Behavior Tree imports
 import py_trees
@@ -40,12 +35,10 @@ import py_trees
 #Import behaviors from separate module
 from behaviors import build_tree
 
-# ============================================================================
-# BT VISUALIZATION CONFIG
-# ============================================================================
-BT_DISPLAY = True           # Set to False to disable BT visualization
-BT_DISPLAY_INTERVAL = 50    # Print tree every N ticks (50 = every 5 seconds at 10Hz)
-BT_DISPLAY_ON_CHANGE = True # Also print when state changes significantly
+#BT VISUALIZATION CONFIG
+BT_DISPLAY = False #Set to False to disable BT visualization
+BT_DISPLAY_INTERVAL = 50 #Print tree every N ticks (50 = every 5 seconds at 10Hz)
+BT_DISPLAY_ON_CHANGE = True #Also print when state changes significantly
 
 
 #Mapping from internal actions to Act module commands
@@ -100,10 +93,11 @@ class PlanNode(Node):
             'detected_color', 'color_area', 'odom_correction', 'detection_zone',
             'detection_distance', 'detection_confidence',
             'distance_left', 'distance_center', 'distance_right',
-            'robot_position', 'startup_complete', 'home_position', 'human_position'
+            'robot_position', 'startup_complete', 'home_position', 'human_position',
+            'origin_offset', 'audio_pub'
         ]
         
-        # Track if human position already saved (only save first detection)
+        #Track if human position already saved (only save first detection)
         self._human_position_saved = False
         for key in blackboard_keys:
             self.bb.register_key(key, access=py_trees.common.Access.WRITE)
@@ -111,7 +105,7 @@ class PlanNode(Node):
         self._init_blackboard()
         self.tree.setup_with_descendants()
         
-        # BT visualization state
+        #BT visualization state
         self._tick_count = 0
         self._last_bt_state = None
         
@@ -138,31 +132,46 @@ class PlanNode(Node):
         self.signals_pub = self.create_publisher(String, '/plan/signals', 10)
         self.bt_status_pub = self.create_publisher(String, '/plan/bt_status', 10)  # BT visualization topic
         
-        #Startup synchronization: wait for robot_description + 20 seconds
+        #Audio publisher for iCreate3 speaker
+        if AUDIO_AVAILABLE:
+            self.audio_pub = self.create_publisher(AudioNoteVector, '/cmd_audio', 10)
+            self.bb.set("audio_pub", self.audio_pub)  # Share with behavior nodes
+        else:
+            self.get_logger().warn('AudioNoteVector not available - audio feedback disabled')
+            self.bb.set("audio_pub", None)
+        
+        #Startup: wait 5 seconds then start BT (no /clock needed on physical robot)
         self._robot_ready = False
-        self._startup_timer = None
+        self._startup_timer = self.create_timer(5.0, self._start_behavior_tree)
         
-        #Subscribe to robot_description to know when robot is spawned
-        self.create_subscription(
-            Clock, '/clock',
-            self._clock_cb, 10
-        )
-        
-        self.get_logger().info('Waiting for simulation clock...')
+        self.get_logger().info('Waiting 5 seconds for sensors to stabilize...')
     
-    def _clock_cb(self, msg):
-        """Callback for /clock topic. Starts BT after simulation time > 0."""
-        if not self._robot_ready and self._startup_timer is None:
-            #Check if simulation has started (time > 0)
-            if msg.clock.sec > 0 or msg.clock.nanosec > 0:
-                self.get_logger().info(f'Simulation started (time={msg.clock.sec}s)! Waiting 15s for stabilization...')
-                self._startup_timer = self.create_timer(15.0, self._start_behavior_tree)
-    
+
     def _start_behavior_tree(self):
-        """Called after clock detected + 15 seconds delay."""
+        """Called after 5-second startup delay on physical robot."""
         if self._startup_timer:
             self._startup_timer.cancel()
             self._startup_timer = None
+        
+        #RESET iCreate3 ODOMETRY TO (0,0,0)
+        self.get_logger().info('=== Plan Node READY - Prima del reset odometria ===')
+        robot_pos = self.bb.get("robot_position")
+        self.get_logger().info(f"POSIZIONE PRIMA DEL RESET ODOMETRIA @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
+
+        self._reset_robot_pose()
+
+        self.get_logger().info('=== Plan Node READY - Dopo del reset odometria ===')
+        robot_pos = self.bb.get("robot_position")
+        self.get_logger().info(f"POSIZIONE DOPO IL RESET ODOMETRIA @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
+
+        #SAVE HOME POSITION (after reset, so it's 0,0,0)
+        robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
+        self.bb.set("home_position", {
+            'x': robot_pos['x'],
+            'y': robot_pos['y'],
+            'theta': robot_pos['theta']
+        })
+        self.get_logger().info(f"HOME POSITION SAVED @ ({robot_pos['x']:.2f}, {robot_pos['y']:.2f})")
         
         self._robot_ready = True
         self.get_logger().info('=== Plan Node READY - Starting Behavior Tree ===')
@@ -170,10 +179,36 @@ class PlanNode(Node):
         #Start the main BT tick timer (10 Hz)
         self.create_timer(0.1, self._tick)
     
+    def _reset_robot_pose(self):
+        """Call iCreate3 reset_pose service to zero odometry."""
+        try:
+            client = self.create_client(ResetPose, '/reset_pose')
+            
+            #Wait up to 10 seconds for the service to be discovered
+            self.get_logger().info('Waiting for /reset_pose service...')
+            if not client.wait_for_service(timeout_sec=10.0):
+                self.get_logger().warn('/reset_pose service not available after 10s, continuing without reset')
+                return
+            
+            self.get_logger().info('/reset_pose service found, sending reset request...')
+            request = ResetPose.Request()
+            request.pose = Pose()
+            future = client.call_async(request)
+            future.add_done_callback(
+                lambda f: self.get_logger().info('ODOMETRY RESET to (0,0,0) via /reset_pose - CONFIRMED')
+            )
+            
+            #Give time for the reset to propagate to odometry
+            time.sleep(2.0)
+            self.get_logger().info('ODOMETRY RESET sent, waited 2s for propagation')
+                
+        except Exception as e:
+            self.get_logger().warn(f'reset_pose error: {e}, continuing anyway')
+    
     def _init_blackboard(self):
         """Initialize blackboard with default values."""
         #Base data
-        self.bb.set("battery", 100.0)  # TODO: Sense doesn't publish battery
+        self.bb.set("battery", 100.0)
         self.bb.set("obstacles", [])
         self.bb.set("detections", {})
         
@@ -201,6 +236,7 @@ class PlanNode(Node):
         self.bb.set("distance_center", 999.0)
         self.bb.set("distance_right", 999.0)
         self.bb.set("robot_position", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
+        self.bb.set("origin_offset", {'x': 0.0, 'y': 0.0, 'theta': 0.0})
         self.bb.set("startup_complete", False)
     
     def _proximity_cb(self, msg, sensor):
@@ -223,14 +259,13 @@ class PlanNode(Node):
     def _odom_cb(self, msg):
         """
             Callback for odometry (Pose2D message).
-            
-            Args:
-                msg: Pose2D message with x, y, theta
+            Applies origin_offset so that (0,0,0) = position after startup.
         """
+        offset = self.bb.get("origin_offset") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
         self.bb.set("robot_position", {
-            'x': msg.x,
-            'y': msg.y,
-            'theta': msg.theta
+            'x': msg.x - offset['x'],
+            'y': msg.y - offset['y'],
+            'theta': msg.theta - offset['theta']
         })
     
     def _battery_cb(self, msg):
@@ -297,8 +332,8 @@ class PlanNode(Node):
             if det['type'] == 'person':
                 self.bb.set("found", "person")
                 
-                # SAVE HUMAN POSITION on first person detection
-                # Use proximity distance to filter (only save if close enough)
+                #SAVE HUMAN POSITION on first person detection
+                #Use proximity distance to filter (only save if close enough)
                 prox_dist = det.get('proximity_distance', 999.0)
                 if not self._human_position_saved and prox_dist < 2.0:
                     robot_pos = self.bb.get("robot_position") or {'x': 0.0, 'y': 0.0, 'theta': 0.0}
@@ -312,7 +347,7 @@ class PlanNode(Node):
                     self._human_position_saved = True
                     self.get_logger().info(f"HUMAN POSITION SAVED @ ({human_pos['x']:.2f}, {human_pos['y']:.2f})")
                     
-                    # Add signal for person detection with position
+                    #Add signal for person detection with position
                     current_signals = self.bb.get("signals") or []
                     person_signal = {
                         "type": "PersonFound",
@@ -348,7 +383,7 @@ class PlanNode(Node):
         self.tree.tick_once()
         self._tick_count += 1
         
-        # BT Visualization
+        #BT Visualization
         if BT_DISPLAY:
             self._display_behavior_tree()
         
@@ -374,7 +409,7 @@ class PlanNode(Node):
         Publishes to /plan/bt_status topic for separate terminal viewing.
         Use: ros2 topic echo /plan/bt_status
         """
-        # Gather current state
+        #Gather current state
         found = self.bb.get("found")
         action = self.bb.get("plan_action")
         current_target = self.bb.get("current_target")
@@ -383,7 +418,7 @@ class PlanNode(Node):
         
         current_state = (found, action, target_name, tuple(visited))
         
-        # Determine if we should publish
+        #Determine if we should publish
         interval_print = (self._tick_count % BT_DISPLAY_INTERVAL == 0)
         state_changed = BT_DISPLAY_ON_CHANGE and (current_state != self._last_bt_state)
         
@@ -392,14 +427,14 @@ class PlanNode(Node):
         
         self._last_bt_state = current_state
         
-        # Build status message
+        #Build status message
         lines = []
         lines.append(f"{'='*60}")
         lines.append(f"[BT] Tick #{self._tick_count} | Action: {action}")
         lines.append(f"[BT] Found: {found} | Target: {target_name}")
         lines.append(f"{'='*60}")
         
-        # Tree structure with status
+        #Tree structure with status
         tree_str = py_trees.display.unicode_tree(
             self.tree,
             show_only_visited=True,
@@ -407,7 +442,7 @@ class PlanNode(Node):
         )
         lines.append(tree_str)
         
-        # Blackboard values
+        #Blackboard values
         d_l = self.bb.get("distance_left") or 0
         d_c = self.bb.get("distance_center") or 0  
         d_r = self.bb.get("distance_right") or 0
@@ -419,7 +454,7 @@ class PlanNode(Node):
         lines.append(f"[BB] Pos: x={robot_pos.get('x', 0):.2f} y={robot_pos.get('y', 0):.2f} θ={robot_pos.get('theta', 0):.2f}")
         lines.append(f"{'='*60}")
         
-        # Publish to topic
+        #Publish to topic
         msg = String()
         msg.data = "\n".join(lines)
         self.bt_status_pub.publish(msg)

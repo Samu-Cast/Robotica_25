@@ -1,10 +1,8 @@
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist, TwistStamped
+from geometry_msgs.msg import Twist
 from std_msgs.msg import String
 from enum import Enum
-
-
 
 
 class ActState(Enum):
@@ -15,7 +13,6 @@ class ActState(Enum):
     FRONT_RIGHT = 4
     RIGHT = 5
     BACK = 6
-    
     #SEARCH_VALVE = 3
     #ACTIVATE_VALVE = 4
     
@@ -25,10 +22,10 @@ class ActNode(Node):
     def __init__(self):
         super().__init__('act_node')
 
-        # Publisher verso il robot per comandare (TwistStamped per Create3 Gazebo)
-        self.cmd_pub = self.create_publisher(TwistStamped, '/cmd_vel', 10)
+        #Robot velocity publisher
+        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
-        # Subscriber dal PLAN che miinvia Sam
+        #Plan command subscriber
         self.plan_sub = self.create_subscription(
             String,
             '/plan/command',
@@ -36,30 +33,28 @@ class ActNode(Node):
             10
         )
 
-        # Stato di default è stop eprche parte fermo
+        #Default state: STOP
         self.state = ActState.STOP
 
-        # Gestione SearchValve 
+        #Gestione SearchValve 
         self.search_start_time = None
-        self.search_angular_speed = 0.4  # rad/s velocita con cui ruota durante la ricerca
+        self.search_angular_speed = 0.4 #rad/s velocita con cui ruota durante la ricerca
 
-        # Gestione ActivateValve (simulazione gira intorno a se stesso per 10 secondi)
+        #Gestione ActivateValve
         self.activate_start_time = None
-        self.activate_duration = 10.0     # secondi
-        self.activate_speed = 1.0         # rad/s
+        self.activate_duration = 10.0 #secondi
+        self.activate_speed = 1.0 #rad/s
 
-        # Timer di controllo (10 Hz) 
+        #Control loop timer (10 Hz)
         self.timer = self.create_timer(0.1, self.control_loop)
 
-        self.get_logger().info("ACT NODE AVVIATO (TwistStamped)")
+        self.get_logger().info("ACT NODE AVVIATO (Twist - Robot Fisico)")
 
     #funzione generale per inviare comandi di velocità al robot in base allo stato
     def send_cmd(self, linear, angular):
-        msg = TwistStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = 'base_link'
-        msg.twist.linear.x = linear
-        msg.twist.angular.z = angular
+        msg = Twist()
+        msg.linear.x = linear
+        msg.angular.z = angular
         self.cmd_pub.publish(msg)
 
     #definisce il comportamento in base al comando ricevuto dal PLAN
@@ -82,7 +77,7 @@ class ActNode(Node):
         elif command == "Stop":
             self.state = ActState.STOP
         
-        # DEBUG: Log cambio di stato
+        #DEBUG: Log cambio di stato
         if self.state != prev_state:
             state_emoji = {
                 ActState.STOP: "🛑",
@@ -113,33 +108,33 @@ class ActNode(Node):
         
     
     def control_loop(self):
-        # STOP
+        #STOP
         if self.state == ActState.STOP:
             self.send_cmd(0.0, 0.0)
 
-        # FRONT: avanti continuo
+        #FRONT: avanti continuo
         elif self.state == ActState.FRONT:
             self.send_cmd(0.2, 0.0)
             
-        # BACK: indietro continuo
+        #BACK: indietro continuo
         elif self.state == ActState.BACK:
             self.send_cmd(-0.2, 0.0)
 
         #LEFT: rotazione continua finché PLAN non cambia
         elif self.state == ActState.LEFT:
-            self.send_cmd(0.0, +0.5)
+            self.send_cmd(0.0, +0.3)
         
         #RIGHT: rotazione continua finché PLAN non cambia
         elif self.state == ActState.RIGHT:
-            self.send_cmd(0.0, -0.5)
+            self.send_cmd(0.0, -0.3)
         
-        # FRONT_LEFT: leggermente a sinistra (avanzando)
+        #FRONT_LEFT: leggermente a sinistra (avanzando)
         elif self.state == ActState.FRONT_LEFT:
-            self.send_cmd(0.15, 0.25)
+            self.send_cmd(0.10, 0.30)
         
-        # FRONT_RIGHT: leggermente a destra (avanzando)
+        #FRONT_RIGHT: leggermente a destra (avanzando)
         elif self.state == ActState.FRONT_RIGHT:
-            self.send_cmd(0.15, -0.25)
+            self.send_cmd(0.10, -0.30)
 
     '''
         # SEARCH_VALVE: rotazione continua con memoria 
@@ -150,8 +145,8 @@ class ActNode(Node):
         elif self.state == ActState.ACTIVATE_VALVE:
             if not self.activate_finished():
                 self.send_cmd(0.0, self.activate_speed)
-            else:
-                self.send_cmd(0.0, 0.0)
+        else:
+            self.send_cmd(0.0, 0.0)
                 self.state = ActState.STOP
                 self.get_logger().info("Attivazione valvola completata")
     

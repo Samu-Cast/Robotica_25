@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Color Detector - Detects colored rectangular targets
-Can be used as a standalone ROS node or as a module
+Color Detector module for identifying colored rectangular targets.
+Supports standalone ROS 2 execution or integration as a module.
 """
 
 import cv2
@@ -10,14 +10,14 @@ import numpy as np
 
 class ColorDetector:
     """
-    Detects colored rectangular targets in images
+        Detects and localizes colored rectangular targets in BGR images.
     """
     
     def __init__(self):
-        # Color detection parameters (HSV ranges)
+        #HSV ranges for target identification
         self.target_colors = {
             'green': {
-                'lower': np.array([40, 50, 50]),
+                'lower': np.array([40, 30, 30]),
                 'upper': np.array([80, 255, 255]),
                 'draw_color': (0, 255, 0)
             },
@@ -27,41 +27,30 @@ class ColorDetector:
                 'draw_color': (255, 0, 0)
             },
             'red': {
-                'lower': np.array([0, 150, 50]),
+                'lower': np.array([0, 150, 100]),
                 'upper': np.array([10, 255, 255]),
+                'lower2': np.array([160, 150, 100]),
+                'upper2': np.array([180, 255, 255]),
                 'draw_color': (0, 0, 255)
             }
         }
-        self.min_area = 2000  # Minimum contour area to consider
+        self.min_area = 2000
     
     def detect(self, frame):
         """
-        Detect colored targets in frame
+        Detect colored targets in a frame.
         
         Args:
-            frame: numpy array (BGR image from OpenCV)
+            frame: OpenCV BGR image.
             
         Returns:
-            dict: {
-                'colors_detected': list of color names found,
-                'main_color': str or None (largest detected color),
-                'targets': [
-                    {
-                        'color': str,
-                        'area': int,
-                        'bbox': [x, y, w, h],
-                        'center': (cx, cy),
-                        'is_rectangle': bool
-                    },
-                    ...
-                ]
-            }
+            Dict containing detected colors, the dominant color, and target metadata.
         """
         if frame is None:
             return self._empty_result()
         
         try:
-            # Pre-processing
+            #Pre-processing
             blurred = cv2.GaussianBlur(frame, (5, 5), 0)
             hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
             
@@ -69,28 +58,33 @@ class ColorDetector:
             colors_detected = set()
             
             for color_name, params in self.target_colors.items():
-                # Create mask for this color
+                #Create mask for this color
                 mask = cv2.inRange(hsv, params['lower'], params['upper'])
                 
-                # Clean up mask
+                #If second range exists, combine masks
+                if 'lower2' in params:
+                    mask2 = cv2.inRange(hsv, params['lower2'], params['upper2'])
+                    mask = cv2.bitwise_or(mask, mask2)
+                
+                #Clean up mask
                 kernel = np.ones((5, 5), np.uint8)
                 mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
                 
-                # Find contours
+                #Find contours
                 contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 
                 for cnt in contours:
                     area = cv2.contourArea(cnt)
                     
                     if area > self.min_area:
-                        # Approximate polygon
+                        #Approximate polygon
                         perimeter = cv2.arcLength(cnt, True)
                         approx = cv2.approxPolyDP(cnt, 0.02 * perimeter, True)
                         
-                        # Check if it's a rectangle (4 vertices)
+                        #Check if it's a rectangle (4 vertices)
                         is_rectangle = len(approx) == 4
                         
-                        # Get bounding box
+                        #Get bounding box
                         x, y, w, h = cv2.boundingRect(cnt)
                         cx = x + w // 2
                         cy = y + h // 2
@@ -105,10 +99,10 @@ class ColorDetector:
                         
                         colors_detected.add(color_name)
             
-            # Sort by area (largest first)
+            #Sort by area (largest first)
             targets.sort(key=lambda x: x['area'], reverse=True)
             
-            # Main color is the largest target
+            #Main color is the largest target
             main_color = targets[0]['color'] if targets else None
             
             return {
@@ -131,14 +125,14 @@ class ColorDetector:
     
     def draw_detections(self, frame, results):
         """
-        Draw bounding boxes on frame
+        Draw detection overlays on the frame.
         
         Args:
-            frame: Original frame
-            results: Detection results from detect()
+            frame: Base image.
+            results: Detection metadata.
             
         Returns:
-            frame with boxes drawn
+            Annotated image.
         """
         annotated = frame.copy()
         
@@ -146,13 +140,13 @@ class ColorDetector:
             x, y, w, h = target['bbox']
             color_name = target['color']
             
-            # Get draw color
+            #Get draw color
             draw_color = self.target_colors.get(color_name, {}).get('draw_color', (255, 255, 255))
             
-            # Draw rectangle
+            #Draw rectangle
             cv2.rectangle(annotated, (x, y), (x + w, y + h), draw_color, 2)
             
-            # Draw label
+            #Draw label
             label = f"{color_name}"
             if target['is_rectangle']:
                 label += " [Rect]"
@@ -162,7 +156,7 @@ class ColorDetector:
         return annotated
 
 
-# Singleton instance for easy import
+#Singleton instance for easy import
 _detector_instance = None
 
 def get_color_detector():
@@ -173,7 +167,7 @@ def get_color_detector():
     return _detector_instance
 
 
-# === ROS2 Node (optional, for standalone use) ===
+#ROS2 Node (optional, for standalone use)
 
 def main(args=None):
     """Run as standalone ROS2 node"""
@@ -207,7 +201,7 @@ def main(args=None):
                 if results['main_color']:
                     self.get_logger().info(f"Detected: {results['colors_detected']}")
                 
-                # Publish debug image
+                #Publish debug image
                 annotated = self.detector.draw_detections(frame, results)
                 out_msg = self.bridge.cv2_to_imgmsg(annotated, encoding='bgr8')
                 self.debug_pub.publish(out_msg)

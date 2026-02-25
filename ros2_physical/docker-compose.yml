@@ -1,13 +1,12 @@
+version: '3.3'
+
 services:
 
-  #Sense Module
-  #Camera + sensori dal robot fisico iCreate3
   sense:
     build:
       context: ../src/sense
     container_name: charlie_sense_physical
     network_mode: host
-    restart: unless-stopped
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
@@ -15,22 +14,21 @@ services:
     volumes:
       - ../src/sense/:/home/ubuntu/sense_ws/
       - ../models/:/home/ubuntu/models/
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 4G
+      - /dev/shm:/dev/shm
+      #deploy:
+      #  resources:
+      #    limits:
+      #      cpus: '2.0'
+      #      memory: 2G
     stdin_open: true
     tty: true
+    command: python3 sense_node.py
 
-  #Plan Module
-  #Behavior tree + logica decisionale
   plan:
     build:
       context: ../src/plan
     container_name: charlie_plan_physical
     network_mode: host
-    restart: unless-stopped
     depends_on:
       - sense
     environment:
@@ -41,15 +39,13 @@ services:
       - ../src/plan/:/home/ubuntu/plan_ws/
     stdin_open: true
     tty: true
+    command: python3 plan_node.py
 
-  #Act Module
-  #Invio comandi di velocità al robot fisico iCreate3
   act:
     build:
       context: ../src/act
     container_name: charlie_act_physical
     network_mode: host
-    restart: unless-stopped
     depends_on:
       - sense
     environment:
@@ -60,3 +56,4 @@ services:
       - ../src/act/:/home/ubuntu/act_ws/
     stdin_open: true
     tty: true
+    command: python3 action_node.py

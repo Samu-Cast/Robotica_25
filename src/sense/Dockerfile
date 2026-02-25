@@ -14,17 +14,12 @@ WORKDIR /home/ubuntu/sense_ws
 RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-colcon-common-extensions \
-    #Vision / OpenCV bridge
-    ros-foxy-cv-bridge \
-    ros-foxy-vision-opencv \
-    #Librerie di sistema per OpenCV
-    libglib2.0-0 \
-    libgl1-mesa-glx \
+    python3-numpy \
+    python3-opencv \
     #CycloneDDS per compatibilità iCreate3
     ros-foxy-rmw-cyclonedds-cpp \
     #Utilità
     git \
-    sudo \
     && rm -rf /var/lib/apt/lists/*
 
 #irobot_create_msgs (build da sorgente per Foxy)
@@ -35,27 +30,18 @@ WORKDIR /home/ubuntu/irobot_ws
 RUN . /opt/ros/foxy/setup.sh && \
     colcon build --symlink-install --packages-select irobot_create_msgs
 
-#Dipendenze Python (YOLO, OpenCV, NumPy)
+#Dipendenze Python
 WORKDIR /home/ubuntu/sense_ws
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir --default-timeout=300 --retries 10 \
-    -r requirements.txt --break-system-packages || \
-    pip3 install --no-cache-dir --default-timeout=300 --retries 10 \
-    -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
 #Configurazione shell
-RUN echo "source /opt/ros/foxy/setup.bash" >> /home/ubuntu/.bashrc && \
-    echo "source /home/ubuntu/irobot_ws/install/setup.bash 2>/dev/null || true" >> /home/ubuntu/.bashrc
+RUN echo "source /opt/ros/foxy/setup.bash" >> ~/.bashrc && \
+    echo "source /home/ubuntu/irobot_ws/install/setup.bash 2>/dev/null || true" >> ~/.bashrc
 
 #Entrypoint
 COPY ./entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-
-#Utente non-root
-RUN useradd -ms /bin/bash ubuntu && \
-    mkdir -p /home/ubuntu/.ros/log && \
-    chown -R ubuntu:ubuntu /home/ubuntu
-USER ubuntu
 
 ENTRYPOINT ["/entrypoint.sh"]
 
