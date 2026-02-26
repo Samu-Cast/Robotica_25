@@ -199,6 +199,17 @@ python -m pytest test_color_detector.py -v
 
 ---
 
+## Video Dimostrativi
+
+Per una dimostrazione visiva del funzionamento di Charlie, sia in ambiente simulato che reale, è possibile consultare i seguenti video:
+
+- **[Dimostrazione Simulazione (Virtuale)](documentation/videos/Dimostrazione_virtuale.mp4)**: Mostra il robot che naviga, evita ostacoli e raggiunge i target nel laboratorio virtuale Gazebo.
+- **[Dimostrazione Robot Fisico](documentation/videos/Dimostrazione_fisica.mp4)**: Mostra il comportamento di Charlie sull'hardware reale iRobot Create 3.
+
+Dettagli supplementari sull'analisi dei comportamenti e dei log sono disponibili nella [Documentazione Tecnica](documentation/design_documentation.md#72-simulation-video).
+
+---
+
 ## Autori
 
 Realizzato da:

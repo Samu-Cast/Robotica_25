@@ -264,6 +264,25 @@ These velocity values were calibrated to balance responsiveness with stability, 
 A complete video recording of the simulation execution demonstrating the robot's autonomous behavior can be found in the `documentation/` folder.
 
 
+## 7.2 Simulation & Physical Videos
+
+Le prestazioni del sistema in ambiente simulato e reale sono documentate nei seguenti video dimostrativi:
+
+### Dimostrazione Simulazione (Virtuale)
+Mostra l'intero workflow della missione: esplorazione, rilevamento vittime, elusione ostacoli e attivazione valvola.
+
+<video src="videos/Dimostrazione_virtuale.mp4" width="100%" controls>
+  Il tuo browser non supporta il tag video. Puoi scaricare il video [qui](videos/Dimostrazione_virtuale.mp4).
+</video>
+
+### Dimostrazione Robot Fisico
+Mostra il robot Charlie (iRobot Create 3) che opera in ambiente reale, utilizzando la Jetson Nano per il processing e la fotocamera CSI per la percezione.
+
+<video src="videos/Dimostrazione_fisica.mp4" width="100%" controls>
+  Il tuo browser non supporta il tag video. Puoi scaricare il video [qui](videos/Dimostrazione_fisica.mp4).
+</video>
+
+
 ---
 ## 7.3 Logs analysis
 
